@@ -35,7 +35,7 @@ double Prpoiss(int cn,  int cov, int Hmean) {
         result=pdf(distribution, cov);
     }
     else{
-        poisson distribution(0.1*Hmean);
+        poisson distribution(0.01*Hmean);
         result=pdf(distribution, cov);
     }
     return result;
@@ -46,120 +46,104 @@ double Prpoiss(int cn,  int cov, int Hmean) {
 static double emissionPr( size_t index, size_t state, vector<size_t> & observations,size_t mean  ){
 
     int cov = observations[index];
-
-    /*
-     int cov = coverage[index];
-
-     if (as.integer( obs[2])  ==1)
-     {
-     if ( stt[2]  =="1")
-     result=Prpoiss(  as.integer(stt[1]) ,cov,30 ) * Prclip(3,3);
-     else
-     result=Prpoiss( as.integer(stt[1]) ,cov,30  ) * Prclip(0,3);
-     }
-     else
-     {
-     if ( stt[2]  =="1")
-     result=Prpoiss(  as.integer(stt[1]) ,coverage,30  ) * Prclip(0,3);
-     else
-     result=Prpoiss( as.integer(stt[1]) ,coverage,30  ) * Prclip(3,3) ;
-     }
-     */
-
     double result=Prpoiss( (int) state ,cov, (int) mean );
     return result;
 }
 
-static void correctModel(cv::Mat &transP, cv::Mat &emisP, cv::Mat &startP)
+static void correctModel(vector<vector<double>> &transP,
+                         vector<vector<double>> &emisP,
+                         vector<double> &startP,
+                         int nStates,
+                         int nObservations,
+                         int max_obs)
 {
     double eps = 1e-30;
-    for (int i=0;i<emisP.rows;i++)
-        for (int j=0;j<emisP.cols;j++)
+    for (int i=0;i<nStates;i++)
+        for (int j=0;j<max_obs;j++)
             if (emisP[i][j]==0)
-                emisP.at<double>(i,j)=eps;
+                emisP[i][j]=eps;
     
-    for (int i=0;i<transP.rows;i++)
-        for (int j=0;j<transP.cols;j++)
-            if (transP.at<double>(i,j)==0)
-                transP.at<double>(i,j)=eps;
+    for (int i=0;i<nStates;i++)
+        for (int j=0;j<nStates;j++)
+            if (transP[i][j]==0)
+                transP[i][j]=eps;
     
-    for (int i=0;i<startP.cols;i++)
-        if (startP.at<double>(0,i)==0)
-            startP.at<double>(0,i)=eps;
+    for (int i=0;i<nStates;i++)
+        if (startP[i]==0)
+            startP[i]=eps;
     
     double sum;
-    for (int i=0;i<transP.rows;i++)
+    for (int i=0;i<nStates;i++)
     {
         sum = 0;
-        for (int j=0;j<transP.cols;j++)
-            sum+=transP.at<double>(i,j);
-        for (int j=0;j<transP.cols;j++)
-            transP.at<double>(i,j)/=sum;
+        for (int j=0;j<nStates;j++)
+            sum+=transP[i][j];
+        for (int j=0;j<nStates;j++)
+            transP[i][j]/=sum;
     }
-    for (int i=0;i<emisP.rows;i++)
+    for (int i=0;i<nStates;i++)
     {
         sum = 0;
-        for (int j=0;j<emisP.cols;j++)
-            sum+=emisP.at<double>(i,j);
-        for (int j=0;j<emisP.cols;j++)
-            emisP.at<double>(i,j)/=sum;
+        for (int j=0;j<max_obs;j++)
+            sum+=emisP[i][j];
+        for (int j=0;j<max_obs;j++)
+            emisP[i][j]/=sum;
     }
     sum = 0;
-    for (int j=0;j<startP.cols;j++)
-        sum+=startP.at<double>(0,j);
-    for (int j=0;j<startP.cols;j++)
-        startP.at<double>(0,j)/=sum;
+    for (int j=0;j<nStates;j++)
+        sum+=startP[j];
+    for (int j=0;j<nStates;j++)
+        startP[j]/=sum;
 }//correctModel
 
 
 
-static void printModel(const cv::Mat &transP,const cv::Mat &emisP,const cv::Mat &startP)
+static void printModel(vector<vector<double>> &transP,
+                       vector<vector<double>> &emisP,
+                       vector<double> &startP, int nStates, int nObservations, int max_obs)
 {
     std::cout << "\nTRANS: \n";
-    for (int r=0;r<transP.rows;r++)
+    for (int r=0;r<nStates;r++)
     {
-        for (int c=0;c<transP.cols;c++)
-            std::cout << transP.at<double>(r,c) << " ";
+        for (int c=0;c<nStates;c++)
+            std::cout << transP[r][c] << " ";
         std::cout << "\n";
     }
     std::cout << "\nEMIS: \n";
-    for (int r=0;r<emisP.rows;r++)
+    for (int r=0;r< nStates;r++)
     {
-        for (int c=0;c<emisP.cols;c++)
-            std::cout << emisP.at<double>(r,c) << " ";
-        std::cout << "\n";
+        for (int c=0;c<max_obs;c++)
+            std::cout <<"state: "<<r<<","<<c<<" "<<	 emisP[r][c] << " ";
+        std::cout << "\n\n";
     }
     std::cout << "\nINIT: \n";
-    for (int r=0;r<startP.rows;r++)
-    {
-        for (int c=0;c<startP.cols;c++)
-            std::cout << startP.at<double>(r,c) << " ";
-        std::cout << "\n";
-    }
+    for (int c=0;c<nStates;c++)
+        std::cout << startP[c] << " ";
+  
     std::cout << "\n";
 }//printModel
 
 
 
+
+//    train(observations,transP, emisP , startP, max_it, nStates,nObservations,max_obs);
+
 /* Calculates maximum likelihood estimates of transition and emission probabilities from a sequence of emissions */
 void train(vector<size_t> &observations,
-           vector<double> &startP,
            vector<vector<double>> &transP,
            vector<vector<double>> &emisP,
-           const int max_iter )
+           vector <double> &startP,
+           const int max_iter ,
+           int nStates,
+           int nObservations,
+           int max_obs)
 {
 
     // 1. Initialization
     int iters = 0;
-   // int T = observations.cols; // number of element per sequence
-   // int C = observations.rows; // number of sequences
-    int nStates = transP.rows; // number of states | also nStates = transP.cols | transP = A = {aij} - NxN
-    int nObservations = emisP.cols; // number of observations | emisP = B = {bj(k)} - NxM
     
-    correctModel(transP,emisP,startP);
+    //  correctModel(transP,emisP,startP,     nStates,      nObservations,        max_obs);
 
-
-    //cv::Mat FTRANS,FINIT,FEMIS;
     vector<vector<double>> FTRANS(nStates, vector<double>(nStates));
     FTRANS = transP;
 
@@ -168,10 +152,9 @@ void train(vector<size_t> &observations,
 
     vector<double> FINIT(nStates);
     FINIT = startP;
-    
+    int T= (int) nObservations;
 
-    //-1 * (std::numeric_limits<double>::max());
-    double logProb = -DBL_MAX;
+    double logProb = -1 * (std::numeric_limits<double>::max());
     double oldLogProb;
     int data = 0;
     do {
@@ -181,21 +164,19 @@ void train(vector<size_t> &observations,
         vector<vector<double>> a(nStates, vector<double>(nObservations));
         vector<double> c(nObservations);
         c[0]=0;
-        
-//        cv::Mat a(nStates,T,CV_64F);
-  //      cv::Mat c(1,T,CV_64F); c.at<double>(0,0) = 0;
-   
         for (int i=0;i<nStates;i++)
         {
-            a[i][0] = startP[0][i]*emisP[i][observations[0]];
+            a[i][0] = startP[i]*emisP[i][observations[0]];
             c[0] += a[i][0];
         }
-        // scale the a0(i)
         
-        c.at<double>(0,0) = 1/c.at<double>(0,0);
+        
+        // scale the a0(i)
+        c[0] = 1/c[0];
         for (int i=0;i<nStates;i++)
             a[i][0] *= c[0];
 
+        
         // 2. The a-pass
         // compute at(i)
         for (int t=1;t<T;t++)
@@ -209,14 +190,17 @@ void train(vector<size_t> &observations,
                 a[i][t] = a[i][t] * emisP[i][observations[t]];
                 c[t] += a[i][t];
             }
+        
             // scale at(i)
             c[t] = 1/c[t];
             for (int i=0;i<nStates;i++)
                 a[i][t]=c[t] * a[i][t];
         }
+        
+        
+        
         // 3. The B-pass
         vector<vector<double>> b(nStates, vector<double>(nObservations));
-   //     cv::Mat b(nStates,T,CV_64F);
         // Let Bt-1(i) = 1 scaled by Ct-1
         for (int i=0;i<nStates;i++)
             b[i][T-1] = c[T-1];
@@ -235,8 +219,6 @@ void train(vector<size_t> &observations,
         int index;
         vector<vector<double>> YN(nStates, vector<double>(nObservations));
         vector<vector<double>> YNN(nStates*nStates, vector<double>(nObservations));
-//        cv::Mat YN(nStates,T,CV_64F);
-  //      cv::Mat YNN(nStates*nStates,T,CV_64F);
         for (int t=0;t<T-1;t++)
         {
             denom = 0;
@@ -255,10 +237,13 @@ void train(vector<size_t> &observations,
                 }
             }
         }
+        
+        
+        
         // 5. Re-estimate A,B and pi
         // re-estimate pi
         for (int i=0;i<nStates;i++)
-            startP[0][i] = YN[i][0];
+            startP[i] = YN[i][0];
         // re-estimate A
         double numer;
         index = 0;
@@ -283,14 +268,13 @@ void train(vector<size_t> &observations,
                 denom = 0;
                 for (int t=0;t<T-1;t++)
                 {
-                    if (observations[t] == j)
+                    if (observations[t] == (size_t) j)
                         numer+= YN[i][t];
                     denom += YN[i][t];
                 }
                 emisP[i][j] = numer/denom;
             }
-        correctModel(transP,emisP,startP);
-        
+        //correctModel(transP,emisP,startP,nStates,nObservations,max_obs);
         /*
         FTRANS = (FTRANS*(data+1)+transP)/(data+2);
         FEMIS = (FEMIS*(data+1)+emisP)/(data+2);
@@ -298,12 +282,13 @@ void train(vector<size_t> &observations,
         */
         
         
+        
         // 6. Compute log[P(O|y)]
         logProb = 0;
         for (int i=0;i<T;i++)
             logProb += log(c[i]);
         logProb *= -1;
-        
+        iters++;
         /* 7. To iterate or not
         data++;
         if (data >= C)
@@ -313,11 +298,15 @@ void train(vector<size_t> &observations,
         }
         */
         
-        //FIX ITER AND LOGPROB DIFFERENCE
+        //FIX ITER AND LOGPROB DIFFERENCE - add R delta
         
     } while (iters<max_iter && logProb>oldLogProb);
-    correctModel(FTRANS,FEMIS,FINIT);
+   
+   // correctModel(FTRANS,FEMIS,FINIT, nStates, nObservations,  max_obs);
     
+    printModel(FTRANS,FEMIS,FINIT,(int) nStates, (int) nObservations,(int)max_obs);
+    
+    /*
     vector<vector<double>> FtransP(nStates, vector<double>(nStates));
     FtransP = FTRANS;
 
@@ -326,6 +315,8 @@ void train(vector<size_t> &observations,
 
     vector<double> FstartP(nStates);
     FstartP = FINIT;
+     */
+    
 }//train
 
 //FIX :NEED TO RETURN FxxxP
@@ -335,49 +326,49 @@ void train(vector<size_t> &observations,
 int main(int argc, const char * argv[])
 {
     
-    if (argc != 8) {
-        std::cerr << "usage: " << argv[0] << " <observation> <nStates> <Haploid Mean> <output prefix> <max_cov> <max_iter> <delta>" << endl;
+    if (argc != 6) {
+        std::cerr << "usage: " << argv[0] << " <observation> <Haploid Mean> <output prefix> <max_iter> <delta>" << endl;
         return EXIT_FAILURE;
     }
     
     const double epsi=1e-99;
+    const string prefix_file(argv[3]);
+    
+    const size_t mean=std::stoi(argv[2]);
 
-    const string prefix_file(argv[4]);
-    
-    
-    const size_t mean=std::stoi(argv[3]);
-
-    //number of states
-    const size_t nstates=ceil(std::stof(argv[2]));
-        size_t nStates=0;
-    if (nstates>30)
-        nStates=31;
-    else if (nStates<1)
-        std::cerr << "nstates>0"<<endl;
-    else
-        nStates= nstates;
-    
-    //observations
+    //observations--------------------------------------------------------
     vector<size_t> observations;
     const string filename2(argv[1]);
     std::ifstream file;
     size_t inputString;
     file.open(filename2);
     int i=0;
+    size_t max=0;
+    size_t maxi=0;
     while(file >> inputString){
         observations.push_back(inputString);
         //observations[i]=inputString;
+        if(inputString>=max)
+            max=inputString;maxi=i;
         i++;
     }
     file.close();
     size_t nObservations=observations.size();
-
+    //----------------------------------------------------------------------
     
     
-    //max cov value observed or upper cov bound
-    size_t max_obs = std::min(std::ceil(30.497*mean),std::stoi(argv[5]));
     
-    //transition probabilities
+    //max cov value observed or upper cov bound -> max nState---------------
+    size_t max_obs = std::min( (int) std::ceil(30.497*mean) , max);
+    size_t nStates= (size_t) std::ceil(max_obs/mean);
+    
+    cout<<"nstates "<<nStates<<endl;
+    cout<<"max_cov "<<max_obs<<endl;
+    //----------------------------------------------------------------------
+ 
+    
+    
+    //transition probabilities------------------------------------------------
     vector<vector<double>> transP(nStates, vector<double>(nStates));
     for (size_t i=0;i<nStates;i++)
     {
@@ -395,8 +386,11 @@ int main(int argc, const char * argv[])
         }
         }//cout<<endl;
     }
+    //---------------------------------------------------------------------------
+
     
-    //emission probabilities
+    
+    //emission probabilities--------------------------------------------------------
     vector<vector<double>> emisP(nStates, vector<double>(max_obs  ));
     for (size_t i=0;i<nStates;i++)
     {
@@ -405,19 +399,21 @@ int main(int argc, const char * argv[])
             emisP[i][j]=Prpoiss( (int) i ,j, (int) mean );
         }//cout<<endl;
     }
+    //---------------------------------------------------------------------------------
 
 
-
-
+    //start probabilities- uniform------------------------------------------------------
     vector<double> startP(nStates);
     for(size_t i=0;i<(nStates);i++)
     {
         startP[i]=1./(nStates);
     }
+    //------------------------------------------------------------------------------------
     
-    const int max_it=std::stoi(argv[6]);
-    train(observations,transP, emisP , startP, max_it);
-    printModel(TRGUESS,EMITGUESS,INITGUESS);
+    
+    
+    const int max_it=std::stoi(argv[4]);
+    train(observations,transP, emisP , startP, max_it,(int) nStates, (int) nObservations,(int)max_obs);
 
     std::cout << "\ndone.\n";
 
