@@ -9,8 +9,13 @@ HMM tools
  snakemake
  boost
  R
+
+
+SamToBed can be compiled:
+g++ -02 SamToBed.cpp -o samToBed
  
- viterbi.cpp needs boost to compile
- using g++ 7.3.0
-  `g++ -W -I {boost_install}/boost/include/ viterbi.cpp -o viterbi`
-  viterbi <coverage observation> <Mean coverage> <output prefix> <scaler>
+viterbi.cpp needs boost to compile
+
+using g++ 7.3.0
+`g++ -W -I {boost_install}/boost/include/ viterbi.cpp -o viterbi`
+viterbi coverage_observation Mean_coverage output_prefix scaler
