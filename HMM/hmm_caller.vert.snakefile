@@ -8,7 +8,7 @@ import argparse
 
 # Snakemake and working directories
 SD = os.path.dirname(workflow.snakefile)
-RD = "/home/cmb-16/mjc/rdagnew/summerproj"
+#RD = "/home/cmb-16/mjc/rdagnew/summerproj"
 
 #config("hmm_caller.json")
 configfile: "sd_analysis.json"
@@ -18,8 +18,6 @@ configfile: "sd_analysis.json"
 ap = argparse.ArgumentParser(description=".")
 ap.add_argument("--subread", help="for filterng step,True/False", required=True)
 
-#ap.add_argument("--c1count", help="Class 1 counts file.", required=True)
-#ap.add_argument("--c2count", help="Class 2 counts file.", required=True)
 
 args=ap.parse_args()
 
@@ -29,7 +27,8 @@ filt=args.subread
 outdir="hmm"
 
 
-#hg38.fai for alignments
+#hg38.fai for alignments  # needs to mask using lc.bed 
+
 fai= open(config["asm"]+".fai")
 contigs = [l.split()[0].strip().replace("|","_") for l in fai]
 bamt = config["bam"]
@@ -112,7 +111,7 @@ rule RunVitter:
     shell:"""
 mean=$(cat {input.avg})
 touch {output.cov}
-./viterbi <(grep -w {wildcards.contig} {input.bins} |cut -f 4 ) $mean hmm/{params.contig_prefix}
+./viterbi <(grep -w {wildcards.contig} {input.bins} |cut -f 4 ) $mean hmm/{params.contig_prefix} 1
 
 """
 
