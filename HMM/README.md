@@ -13,5 +13,5 @@ HMM tools
  
  viterbi.cpp needs boost to compile
  using g++ 7.3.0
-  g++ -W -I {boost_install}/boost/include/ viterbi.cpp -o viterbi
-  usage: ./viterbi <coverage observation> <Mean coverage> <output prefix> <scaler>
+  `g++ -W -I {boost_install}/boost/include/ viterbi.cpp -o viterbi`
+  usage: viterbi <coverage observation> <Mean coverage> <output prefix> <scaler>
