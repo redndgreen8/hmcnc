@@ -5,7 +5,7 @@
 
 bam=$1
 fai=$2
-filter=$3
+filter=$3 #1 or 0 for clr subread
 
 
 samtools view -@ 2 $bam | samToBed /dev/stdin/ --useH --flag   > samBed.$bam.bed
@@ -25,12 +25,27 @@ awk 'BEGIN{OFS="\t";c=0;sum=0;} sum=sum+$4;c=c+1;END{print sum/c;}' coverage.$ba
 mean=$(cat mean.$bam.txt)
 echo $mean
 
-#viterbi2.cpp
-for r in ` cat $fai|cut -f 1`;do echo $r; viterbi <(grep -w $r coverage.$bam.bed |cut -f 4 ) $mean $bam.$r 1; done
+#first run
+for r in ` cat $fai|cut -f 1`;do echo $r; viterbi <(grep -w $r coverage.$bam.bed |cut -f 4 ) $mean pre.$bam.$r 1; done
+for r in ` cat $fai|cut -f 1`;do echo $r; cat pre.$bam.$r.viterout.txt >> pre.$bam.viterout.txt;done
 
+paste <(cat coverage.$bam.bed) <(cat pre.$bam.viterout.txt) > pre.$bam.viterout.bed
+
+bash viter.to_call.sh pre.$bam.viterout.bed 
+
+cat DUPcalls.masked_CN.pre.$bam.viterout.bed | awk '$4==3' -| awk 'BEGIN{OFS="\t";c=0;sum=0;} sum=sum+($3-$2);c=c+1;END{print sum/c;}' - |tail -1 >scaler.$bam.txt
+scaler = $(cat scaler.$bam.txt)
+echo $scaler
+ 
+#scaled run
+for r in ` cat $fai|cut -f 1`;do echo $r; viterbi <(grep -w $r coverage.$bam.bed |cut -f 4 ) $mean $bam.$r $scaler; done
 for r in ` cat $fai|cut -f 1`;do echo $r; cat $bam.$r.viterout.txt >> $bam.viterout.txt;done
 
 paste <(cat coverage.$bam.bed) <(cat $bam.viterout.txt) > $bam.viterout.bed
+
+bash viter.to_call.sh $bam.viterout.bed
+
+rm pre.*
 
 #plot every 50000 points ~ 5MB per plot
 Rscript plot.HMM.noclip.R $bam.viterout.bed $bam 50000 mean.$bam.txt
