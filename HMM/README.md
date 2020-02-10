@@ -1,21 +1,21 @@
-# hmm
-HMM tools
- pipeline for calling CNVs in assmeblies or alignments
+# CNV hmm
+## HMM tools
+### pipeline for calling CNVs in assmeblies or alignments
  
  needs :
- bedtools
- samtools
- python 3.6.7
- snakemake
- boost
- R
-
+ 1. bedtools
+ 2. samtools
+ 3. python 3.6.7
+ 4. snakemake
+ 5. boost
+ 6. R
+7. gcc 7.3.0
 
 SamToBed can be compiled:
-g++ -02 SamToBed.cpp -o samToBed
+    g++ -02 SamToBed.cpp -o samToBed
  
 viterbi.cpp needs boost to compile
 
-using g++ 7.3.0
-`g++ -W -I {boost_install}/boost/include/ viterbi.cpp -o viterbi`
+    `g++ -W -I {boost_install}/boost/include/ viterbi.cpp -o viterbi`
+    
 viterbi coverage_observation Mean_coverage output_prefix scaler
