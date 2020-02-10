@@ -12,7 +12,7 @@
 7. gcc 7.3.0
 
 SamToBed can be compiled:
-    g++ -02 SamToBed.cpp -o samToBed
+    `g++ -02 SamToBed.cpp -o samToBed`
  
 viterbi.cpp needs boost to compile
 
