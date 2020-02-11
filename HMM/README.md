@@ -1,6 +1,6 @@
 # CNV hmm
 ## HMM tools
-### pipeline for calling CNVs in assmeblies or alignments
+### pipeline for calling CNVs in assemblies or alignments
  
  needs :
  1. bedtools
