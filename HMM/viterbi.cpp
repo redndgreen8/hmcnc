@@ -19,7 +19,7 @@ using std::string;
 using std::log;
 
 
-double max_over_row(vector<vector<double>> &v , size_t col ,size_t nStates ){
+static double max_over_row(vector<vector<double>> &v , size_t col ,size_t nStates ){
 
     double maxi=-1 * (std::numeric_limits<double>::max()) ;
     for(size_t i=0;i< nStates;i++){
@@ -29,7 +29,7 @@ double max_over_row(vector<vector<double>> &v , size_t col ,size_t nStates ){
 }
 
 
-double max_over_rows(vector<vector<double>> &v , size_t col ,vector<vector<double>> &v2 , size_t nextState,size_t nStates ){
+static double max_over_rows(vector<vector<double>> &v , size_t col ,vector<vector<double>> &v2 , size_t nextState,size_t nStates ){
     double maxi2=-1 * (std::numeric_limits<double>::max()) ;
 
     for(size_t i=0;i< nStates;i++){
@@ -127,7 +127,7 @@ void viterbi( vector<double> &startP,
     // Init
     for(size_t i=0;i<nStates;i++)
     {
-        v[i][0] = log( startP[i] * emissionPr( 1, i , observations,mean) );
+        v[i][0] = log( startP[i] * emissionPr( 0, i , observations,mean) );
     }
 // Iteration
     for(size_t k=1 ; k<nObservations ; k++)
@@ -144,6 +144,8 @@ void viterbi( vector<double> &startP,
             v[i][k] = log(emissionPr( k,i, observations,mean)) + maxi;
         }
     }
+
+    
 // Traceback
     for(size_t i=0;i<nStates;i++)
     {
@@ -176,10 +178,11 @@ void viterbi( vector<double> &startP,
 
 int main(int argc, const char * argv[]) {
 
-if (argc != 5) {
-    std::cerr << "usage: " << argv[0] << " <coverage observation> <Mean coverage> <output prefix> <scaler>" << endl;
-    return EXIT_FAILURE;
-}
+    if (argc < 5) 
+    {
+        std::cerr << "usage: " << argv[0] << " <coverage observation> <scaler> <output prefix> <provide mean[0/1]> <Mean D.coverage>" << endl;
+        return EXIT_FAILURE;
+    }
 
     const string prefix_file(argv[3]);
     //const string mean_file(argv[2]);
@@ -206,14 +209,19 @@ if (argc != 5) {
             max=inputString;
             //      maxi=i;
         }
-        i++;
     }
     file.close();
 
     size_t nObservations=observations.size();
 
-    const size_t mean= std::floor( std::stoi(argv[2]) /2 );
-//    const size_t mean = std::floor( (sum/nObservations)  /2 );
+    
+    size_t mean = std::floor( (sum/nObservations)  /2 );
+    if (argv[4]==1){
+        mean=std::floor( std::stoi(argv[5]) /2 );
+    }
+
+
+
 /*
     std::ifstream file2;
 
@@ -260,22 +268,22 @@ if (argc != 5) {
 
         double epsi23 = result2/result3;
 
-        poisson distribution3(mean);
+    /*    poisson distribution3(mean);
         double result1=pdf(distribution3, mean);
 
         poisson distribution4(2*mean);
         double result4=pdf(distribution4, mean);
 
         double epsi21 = result4/result1;
-
-        cout<<"epsi23 "<<epsi23<<" epsi21 "<<epsi21<<endl;
+*/
+     //   cout<<"epsi23 "<<epsi23<<" epsi21 "<<epsi21<<endl;
 
 
 //const double input_epsi = std::stod(argv[5]);
 
     //*300
-    const double scale = std::stod(argv[4]);
-double beta = log(nStates-1) + log(epsi) + (scale * log(epsi23));
+    const double scale = std::stod(argv[2]);
+    double beta = log(nStates-1) + log(epsi) + (scale * log(epsi23));
                                     //mean no. of bins for cn=3 call
 
 
