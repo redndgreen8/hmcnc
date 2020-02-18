@@ -18,7 +18,7 @@ fi
 
 
 
-intersectBed -c -a <(bedtools makewindows -b <( awk 'BEGIN{OFS="\t"}{print $1,0,$2}' $fai) -w 100) -b samBed.$bam.bed.f > coverage.$bam.bed
+intersectBed -c -a <(bedtools makewindows -b <( awk 'BEGIN{OFS="\t"}{print $1,0,$2}' $fai) -w 100 |intersectBed -v -a stdin -b lc.bed) -b samBed.$bam.bed.f > coverage.$bam.bed
 
 awk 'BEGIN{OFS="\t";c=0;sum=0;} sum=sum+$4;c=c+1;END{print sum/c;}' coverage.$bam.bed |tail -1> mean.$bam.txt
 
