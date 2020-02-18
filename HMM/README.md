@@ -18,6 +18,6 @@ viterbi.cpp needs boost to compile
 
     `g++ -W -I {boost_install}/boost/include/ viterbi.cpp -o viterbi`
     
-viterbi coverage_observation scaler output_prefix provide_cov[0/1] Mean_coverage
+viterbi coverage_observation scaler output_prefix [[calculate_cov/provide_cov][0/1]] Mean_coverage
 
 bash hmm_caller.vert.sh bam_file ref.fai_file 0/1 (for filtering clr reads)
