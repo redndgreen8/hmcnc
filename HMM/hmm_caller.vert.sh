@@ -3,12 +3,13 @@
 
 
 
-bam=$1
+file=$1
+bam='echo $file |tr "/" "\n"|tail -1'
 fai=$2
 filter=$3 #1 or 0 for clr subread
 
 
-samtools view -@ 2 $bam | samToBed /dev/stdin/ --useH --flag   > samBed.$bam.bed
+samtools view -@ 2 $file | samToBed /dev/stdin/ --useH --flag   > samBed.$bam.bed
 
 if [filter==1];then
 	cat samBed.$bam.bed | python filter.subread.py |sort -k1,1 -k2,2n >samBed.$bam.bed.f
