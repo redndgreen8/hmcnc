@@ -26,7 +26,7 @@ mean=$(cat mean.$bam.txt)
 echo $mean
 
 #first run
-for r in ` cat $fai|cut -f 1`;do echo $r; viterbi <(grep -w $r coverage.$bam.bed |cut -f 4 ) $mean pre.$bam.$r 1; done
+for r in ` cat $fai|cut -f 1`;do echo $r; viterbi <(grep -w $r coverage.$bam.bed |cut -f 4 ) 1 pre.$bam.$r 1 $mean; done
 for r in ` cat $fai|cut -f 1`;do echo $r; cat pre.$bam.$r.viterout.txt >> pre.$bam.viterout.txt;done
 
 paste <(cat coverage.$bam.bed) <(cat pre.$bam.viterout.txt) > pre.$bam.viterout.bed
@@ -38,7 +38,7 @@ scaler = $(cat scaler.$bam.txt)
 echo $scaler
  
 #scaled run
-for r in ` cat $fai|cut -f 1`;do echo $r; viterbi <(grep -w $r coverage.$bam.bed |cut -f 4 ) $mean $bam.$r $scaler; done
+for r in ` cat $fai|cut -f 1`;do echo $r; viterbi <(grep -w $r coverage.$bam.bed |cut -f 4 ) $scaler $bam.$r 1 $mean ; done
 for r in ` cat $fai|cut -f 1`;do echo $r; cat $bam.$r.viterout.txt >> $bam.viterout.txt;done
 
 paste <(cat coverage.$bam.bed) <(cat $bam.viterout.txt) > $bam.viterout.bed
