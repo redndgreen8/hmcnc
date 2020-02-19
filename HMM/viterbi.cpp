@@ -180,7 +180,7 @@ int main(int argc, const char * argv[]) {
 
     if (argc < 5) 
     {
-        std::cerr << "usage: " << argv[0] << " <coverage observation> <scaler> <output prefix> <provide mean[0/1]> <Mean D.coverage>" << endl;
+        std::cerr << "usage: " << argv[0] << " <coverage observation> <scaler> <output prefix> <calculate_mean/provide_mean[0/1]> <Mean D.coverage>" << endl;
         return EXIT_FAILURE;
     }
 

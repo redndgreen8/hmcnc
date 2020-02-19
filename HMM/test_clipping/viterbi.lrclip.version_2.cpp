@@ -286,7 +286,7 @@ int main(int argc, const char * argv[])
 
     if (argc < 8) 
     {
-        std::cerr << "usage: " << argv[0] << " <coverage observation>  <clip observation> <output prefix> <scaler> <epsi> <clip threshold> <provide mean[0/1]> <Hmean> " << endl;
+        std::cerr << "usage: " << argv[0] << " <coverage observation>  <clip observation> <output prefix> <scaler> <epsi> <clip threshold> <calculate_mean/provide_mean[0/1]> <Hmean> " << endl;
         return EXIT_FAILURE;
     }
 
