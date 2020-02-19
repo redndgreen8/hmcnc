@@ -1,9 +1,9 @@
 #!/usr/bin/bash
 
 
-
-bed=$1
-cat $bed | awk '
+file=$1
+bed='echo $file|tr "/" "\n"|tail -1'
+cat $file | awk '
 BEGIN{OFS="\t";s=0;e=0;cns=0;o=3;}
 {
     if(NR==1)
