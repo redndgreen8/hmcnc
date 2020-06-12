@@ -34,8 +34,8 @@ paste <(cat coverage.$bam.bed) <(cat pre.$bam.viterout.txt) > pre.$bam.viterout.
 
 bash viter.to_call.sh pre.$bam.viterout.bed 
 
-cat DUPcalls.masked_CN.pre.$bam.viterout.bed | awk '$4==3' -| awk 'BEGIN{OFS="\t";c=0;sum=0;} sum=sum+($3-$2);c=c+1;END{print sum/c;}' - |tail -1 >scaler.$bam.txt
-scaler = $(cat scaler.$bam.txt)
+cat DUPcalls.masked_CN.pre.$bam.viterout.bed | awk '$4==3' -| awk 'BEGIN{OFS="\t";c=0;sum=0;} sum=sum+($3-$2);c=c+1;END{print sum/(c*100);}' - |tail -1 >scaler.$bam.txt
+scaler=$(cat scaler.$bam.txt)
 echo $scaler
  
 #scaled run
@@ -46,7 +46,7 @@ paste <(cat coverage.$bam.bed) <(cat $bam.viterout.txt) > $bam.viterout.bed
 
 bash viter.to_call.sh $bam.viterout.bed
 
-rm pre.*
+rm *pre.*
 
 #plot every 50000 points ~ 5MB per plot
 Rscript plot.HMM.noclip.R $bam.viterout.bed $bam 50000 mean.$bam.txt
