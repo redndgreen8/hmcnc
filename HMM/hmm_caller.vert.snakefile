@@ -8,7 +8,7 @@ import argparse
 
 # Snakemake and working directories
 SD = os.path.dirname(workflow.snakefile)
-RD = "/home/cmb-16/mjc/rdagnew/summerproj"
+RD = "/home/cmb-16/mjc/rdagnew/summerproj/hmm/HMM"
 
 #config("hmm_caller.json")
 #configfile: "sd_analysis.json"
@@ -18,14 +18,14 @@ RD = "/home/cmb-16/mjc/rdagnew/summerproj"
 #ap = argparse.ArgumentParser(description=".")
 #ap.add_argument("--subread", help="require subread filtering step,0/1", required=True)
 
-filt=config["subread"]
+filt=int(config["subread"])
 #args=ap.parse_args()
 
 #filt=args.subread
-
-
+threads=config["t"]
+mapQ=config["MQ"]
 outdir="hmm"
-
+    
 
 #hg38.fai for alignments  # needs to mask using lc.bed 
 
@@ -41,11 +41,14 @@ rule all:
         no_subreadbed="hmm/cov.no_subread.bed",
         bins="hmm/coverage.bins.bed",
         avg="hmm/mean_cov.txt",
+        previtterout=expand("hmm/{ctg}.viterout.txt.pre", ctg=contigs),
         vitterout=expand("hmm/{ctg}.viterout.txt", ctg=contigs),
+        pcn=expand("hmm/copy_number.{ctg}.bed.pre", ctg=contigs),
         cn=expand("hmm/copy_number.{ctg}.bed", ctg=contigs),
-        allCN="hmm/copy_number.tsv",
+        pallCN="hmm/pre.copy_number.tsv",
+        allCN="hmm/copy_number.tsv",    
         plot=expand("hmm/{bm}.noclip.pdf",bm=prefix_bam),
-	scale=("hmm/scaler.txt"),
+	scale="hmm/scaler.txt",
 
 rule MakeCovBed:
     input:
@@ -56,26 +59,30 @@ rule MakeCovBed:
         rd=RD,
     shell:"""
 mkdir -p hmm
-samtools view -@ 2 {input.bam} | {params.rd}/samToBed /dev/stdin/ --useH --flag   > {output.bed}
+/home/cmb-16/mjc/rdagnew/anaconda3/envs/sam_env/bin/samtools view -@ 2 {input.bam} | {params.rd}/samToBed /dev/stdin/ --useH --flag   > {output.bed}
 """
-
-rule FilterSubreads:
-    input:
-        bed="hmm/cov.bed",
-    output:
-        covbed="hmm/cov.no_subread.bed",
-    params:
-        sd=SD,
-        f=filt,
-    shell:"""
-
-if [{params.f} == 1];then
-    cat {input.bed} | python filter.subread.py |sort -k1,1 -k2,2n > {output.covbed}
-else
-    mv {input.bed} {output.covbed}
-fi
-"""
-
+if filt==0:
+    rule FilterSubreads0:
+        input:
+            bed="hmm/cov.bed",
+        output:
+            covbed="hmm/cov.no_subread.bed",
+        params:
+            rd=RD,
+        shell:"""
+    	cp {input.bed} {output.covbed}
+	"""
+else:
+    rule FilterSubreads1:
+        input:
+            bed="hmm/cov.bed",
+        output:
+            covbed="hmm/cov.no_subread.bed",
+        params:
+            rd=RD,
+        shell:"""
+       cat {input.bed} | python {params.rd}/filter.subread.py --mapq {mapQ} |sort -k1,1 -k2,2n > {output.covbed}
+        """
 rule MakeIntersect:
     input:
         bed="hmm/cov.no_subread.bed",
@@ -86,7 +93,7 @@ rule MakeIntersect:
         asm=config["asm"],
     shell:"""
 
-intersectBed -c -a <(bedtools makewindows -b <( awk 'BEGIN{{OFS="\t"}}{{print $1,0,$2}}' {params.asm}.fai) -w 100) -b {input.bed} > {output.bins}
+intersectBed -c -a <(bedtools makewindows -b <( awk 'BEGIN{{OFS="\t"}}{{print $1,0,$2}}' {params.asm}.fai) -w 100|intersectBed -v -a stdin -b {params.rd}/lc.bed) -b {input.bed} > {output.bins}
 """
 
 rule GetMeanCoverage:
@@ -105,54 +112,60 @@ rule PreRunVitter:
         avg="hmm/mean_cov.txt",
         bins="hmm/coverage.bins.bed",
     output:
-        cov="hmm/pre.{contig}.viterout.txt",
+        pcov="hmm/{contig}.viterout.txt.pre",
     params:
         rd=RD,
         contig_prefix="{contig}",
     shell:"""
 mean=$(cat {input.avg})
-touch {output.cov}
-./viterbi <(grep -w {wildcards.contig} {input.bins} |cut -f 4 ) 1 hmm/pre.{params.contig_prefix} 1 $mean
-
+{params.rd}/viterbi <(grep -w {wildcards.contig} {input.bins} |cut -f 4 ) 1 hmm/pre.{params.contig_prefix} 1 $mean
+mv hmm/pre.{params.contig_prefix}.viterout.txt {output.pcov}
 """
 
 rule PreorderVitter:
     input:
-        CopyNumber="hmm/pre.{contig}.viterout.txt",
+        pCopyNumber="hmm/{contig}.viterout.txt.pre",
         bins="hmm/coverage.bins.bed",
     output:
-        cn="hmm/pre.copy_number.{contig}.bed",
+        pcn="hmm/copy_number.{contig}.bed.pre",
     shell:"""
 
-paste <(cat {input.bins}|grep -w {wildcards.contig} ) <(cat {input.CopyNumber}  ) > {output.cn}
+paste <(cat {input.bins}|grep -w {wildcards.contig} ) <(cat {input.pCopyNumber}  ) > {output.pcn}
 
 """
 
 rule PrecombineVitter:
     input:
-        allCopyNumberBED=expand("hmm/pre.copy_number.{contig}.bed", contig=contigs),
+        pallCopyNumberBED=expand("hmm/copy_number.{contig}.bed.pre", contig=contigs),
     output:
-        allCN="hmm/pre.copy_number.tsv",
-	#dupCall="hmm/pre.dup_call.tsv",
-	scale="hmm/scaler.txt",
+        pallCN="hmm/pre.copy_number.tsv",
+    params:
+        rd=RD,
     shell:"""
-
-cat {input.allCopyNumberBED} > {output.allCN}
-pref='echo {output.allCN} |tr "/" "\n"|tail-1'
-bash viter.to_call.sh {output.allCN}
-cat DUPcalls.masked_CN.$pref.viterout.bed | awk '$4==3' -| awk 'BEGIN{{OFS="\t";c=0;sum=0;}} sum=sum+($3-$2);c=c+1;END{{print sum/c;}}' - |tail -1 > {output.scale}
-
-
-
+cat {input.pallCopyNumberBED} > {output.pallCN}
 """
 
+rule scaler:
+    input:
+        pallCN="hmm/pre.copy_number.tsv",
+    output:
+        scale="hmm/scaler.txt",
+    params:
+        rd=RD,
+    shell:"""
+pref=$(echo {input.pallCN} |tr "/" "\\n"|tail -1)
+echo $pref
+bash {params.rd}/viter.to_call.sh {input.pallCN}
+cat DUPcalls.masked_CN.$pref | awk '$4==3' -| awk 'BEGIN{{OFS="\t";c=0;sum=0;}} sum=sum+($3-$2);c=c+1;END{{print sum/(c*100);}}' - |tail -1 > {output.scale}
+
+"""
 
 
 rule RunVitter:
     input:
         avg="hmm/mean_cov.txt",
         bins="hmm/coverage.bins.bed",
-	scale="hmm/scaler.txt",
+        scale="hmm/scaler.txt",
     output:
         cov="hmm/{contig}.viterout.txt",
     params:
@@ -161,8 +174,8 @@ rule RunVitter:
     shell:"""
 mean=$(cat {input.avg})
 scaler=$(cat {input.scale})
+{params.rd}/viterbi <(grep -w {wildcards.contig} {input.bins} |cut -f 4 ) $scaler hmm/{params.contig_prefix} 1 $mean
 touch {output.cov}
-./viterbi <(grep -w {wildcards.contig} {input.bins} |cut -f 4 ) $scaler hmm/pre.{params.contig_prefix} 1 $mean
 
 """
 
@@ -186,7 +199,6 @@ rule combineVitter:
     shell:"""
 
 cat {input.allCopyNumberBED} > {output.allCN}
-rm hmm/pre.*
 
 """
 
@@ -202,8 +214,9 @@ rule PlotBins:
         rd=RD,
         genome_prefix="{prefix_bam}",
     shell:"""
-
+bash {params.rd}/viter.to_call.sh {input.allCN}
 #plot every 50000 points ~ 5 MegaBases
-Rscript plot.HMM.noclip.R {input.allCN} {params.genome_prefix} 50000 {input.avg}
+#Rscript {params.rd}/plot.HMM.noclip.R {input.allCN} {params.genome_prefix} 50000 {input.avg}
 touch {output.plot}
+
 """

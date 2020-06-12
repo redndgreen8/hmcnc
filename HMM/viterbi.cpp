@@ -216,7 +216,7 @@ int main(int argc, const char * argv[]) {
 
     
     size_t mean = std::floor( (sum/nObservations)  /2 );
-    if (argv[4]==1){
+    if (std::stoi(argv[4])==1){
         mean=std::floor( std::stoi(argv[5]) /2 );
     }
 

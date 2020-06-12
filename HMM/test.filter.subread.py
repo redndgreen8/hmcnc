@@ -49,9 +49,15 @@ def span(alignmentList, non):
             if v in non:
                 continue
             if high > sorted_intervals[v][1]:
-                continue
+                if low <= sorted_intervals[v][0]: 
+                    non.add(v)
+                else:#should never be triggered if sorted
+                    continue
             else:
+                if low == sorted_intervals[v][0]:
+                    non.add(v-1)
                 high = sorted_intervals[v][1] # merge with the current run
+                #overlap = high-sorted_intervals[v][0]
         else:  # current run is over
             span += (high-low)
             low, high = sorted_intervals[v][0], sorted_intervals[v][1]  # start new run
@@ -71,8 +77,8 @@ def NonOverlappingAlignedBases(alignmentList):
         l2= alignmentList[r+1]
         c2=coordinate(r_len, int(l2[4]),int(l2[5]),int(l2[6]))
         if c1[0]==c2[0] and c1[1]==c2[1]: #and readname is the same
-                non.add(i)
-                non.add(j)
+                non.add(r)
+                #non.add(j)
                 continue
 
     cs = ( span(alignmentList, non), non)
@@ -129,6 +135,6 @@ for molecule in reads.keys():
     #print("max"+str(max))
     for j in range(0,len(reads[molecule][index])  ):
         #print(c[1])
-        if j not in c[1] :
+        if j not in c[1] :#c[1] list ??
             sys.stdout.write("\t".join(reads[molecule][index][j]) )
 
