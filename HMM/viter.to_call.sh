@@ -2,7 +2,8 @@
 
 
 file=$1
-bed=$(echo $file|tr "/" "\n"|tail -1)
+dir=$2
+bed='echo $file|tr "/" "\n"|tail -1'
 cat $file | awk '
 BEGIN{OFS="\t";s=0;e=0;cns=0;o=3;}
 {
@@ -28,12 +29,12 @@ BEGIN{OFS="\t";s=0;e=0;cns=0;o=3;}
 }
 END{
 if(o==0){print s,e,cns;}
-} ' |intersectBed -v -a stdin -b $sum/hg38.telomere.extended.bed > ini_call.$bed
+} ' |intersectBed -v -a stdin -b $dir/hg38.telomere.extended.bed > ini_call.$bed
 
 awk '$4<2' ini_call.$bed > DELcalls.$bed
 
-intersectBed -wa -wb -a <( awk '$4>2' ini_call.$bed |cut -f 1-3) -b $sum/repeatMask.merged.bed |sort -k1,1 -k2,2n | python $sum/repeatMask.py | groupBy -g 1,2,3,10 -c 9| awk 'BEGIN{OFS="\t"} $6=$5/$4' >DUPcalls.rep_int.$bed
+intersectBed -wa -wb -a <( awk '$4>2' ini_call.$bed |cut -f 1-3) -b $dir/repeatMask.merged.bed |sort -k1,1 -k2,2n | python repeatMask.py | groupBy -g 1,2,3,10 -c 9| awk 'BEGIN{OFS="\t"} $6=$5/$4' >DUPcalls.rep_int.$bed
 
-intersectBed -v -a <( awk '$4>2' ini_call.$bed |cut -f 1-3) -b $sum/repeatMask.merged.bed|awk 'BEGIN{OFS="\t"}{print$1,$2,$3,$3-$2,0,0}'>>DUPcalls.rep_int.$bed
+intersectBed -v -a <( awk '$4>2' ini_call.$bed |cut -f 1-3) -b $dir/repeatMask.merged.bed|awk 'BEGIN{OFS="\t"}{print$1,$2,$3,$3-$2,0,0}'>>DUPcalls.rep_int.$bed
 
 intersectBed -wa -wb -a <(awk '$6<0.8' DUPcalls.rep_int.$bed) -b <( awk '$4>2' ini_call.$bed ) |awk 'BEGIN{OFS="\t"} {print $1,$2,$3,$10,$6;}' > DUPcalls.masked_CN.$bed

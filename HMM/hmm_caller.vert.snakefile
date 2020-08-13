@@ -7,11 +7,8 @@ import argparse
 
 
 # Snakemake and working directories
-SD = os.path.dirname(workflow.snakefile)
-RD = "/home/cmb-16/mjc/rdagnew/summerproj/hmm/HMM"
-
-#config("hmm_caller.json")
-#configfile: "sd_analysis.json"
+#SD = os.path.dirname(workflow.snakefile)
+RD = config["script_dir"]
 
 
 
@@ -19,13 +16,11 @@ RD = "/home/cmb-16/mjc/rdagnew/summerproj/hmm/HMM"
 #ap.add_argument("--subread", help="require subread filtering step,0/1", required=True)
 
 filt=int(config["subread"])
-#args=ap.parse_args()
-
-#filt=args.subread
 threads=config["t"]
 mapQ=config["MQ"]
 outdir="hmm"
-    
+
+#min_collapse_size=config['min_collapse_size']
 
 #hg38.fai for alignments  # needs to mask using lc.bed 
 
@@ -61,7 +56,7 @@ rule MakeCovBed:
         rd=RD,
     shell:"""
 mkdir -p hmm
-/home/cmb-16/mjc/rdagnew/anaconda3/envs/sam_env/bin/samtools view -@ 2 {input.bam} | {params.rd}/samToBed /dev/stdin/ --useH --flag   > {output.bed}
+samtools view -@ 2 {input.bam} | {params.rd}/samToBed /dev/stdin/ --useH --flag   > {output.bed}
 """
 if filt==0:
     rule FilterSubreads0:
@@ -157,7 +152,7 @@ rule scaler:
     shell:"""
 pref=$(echo {input.pallCN} |tr "/" "\\n"|tail -1)
 echo $pref
-bash {params.rd}/viter.to_call.sh {input.pallCN}
+bash {params.rd}/viter.to_call.sh {input.pallCN} {params.rd}
 cat DUPcalls.masked_CN.$pref | awk '$4==3' -| awk 'BEGIN{{OFS="\t";c=0;sum=0;}} sum=sum+($3-$2);c=c+1;END{{print sum/(c*100);}}' - |tail -1 > {output.scale}
 
 """
@@ -216,7 +211,7 @@ rule call:
         rd=RD,
         genome_prefix=prefix_bam,
     shell:"""
-bash {params.rd}/viter.to_call.sh {input.allCN}
+bash {params.rd}/viter.to_call.sh {input.allCN} {params.rd}
 touch {output.call}
 
 
@@ -229,9 +224,12 @@ rule compositeCall:
     input:
         call="DUPcalls.masked_CN.copy_number.tsv",
     output:
-        compCall="DUPcalls.FINAL.composite.bed",    
+        compCall="DUPcalls.FINAL.composite.bed",
+    params:
+        rd=RD,
+        asm=config["asm"],      
     shell:"""
-mergeBed -i <($sort {input.call}) |intersectBed -wb -b stdin -a {input.call} |groupBy -g 6,7,8 -c 2,4,5 -o collapse,collapse,collapse|awk '$3-$2 >15000'|intersectBed -wa -v -a stdin  -b <(slopBed -b 50000 -g $hg38/hg38.fa.fai -i $sum/annotation/gap.bed)  $sum/annotation/centromere.bed >{output.compCall}    
+mergeBed -i <(cat {input.call})|sort -k1,1 -k2,2n |intersectBed -wb -b stdin -a {input.call} |groupBy -g 6,7,8 -c 2,4,5 -o collapse,collapse,collapse|awk '$3-$2 >15000'|intersectBed -wa -v -a stdin  -b <(slopBed -b 50000 -g {params.asm}.fai -i {params.rd}/annotation/gap.bed)  {params.rd}/annotation/centromere.bed >{output.compCall}    
 """
 
 
