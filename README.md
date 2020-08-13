@@ -42,5 +42,11 @@ viterbi.cpp needs boost to compile
 
 `g++ -W -I {boost_install}/boost/include/ viterbi.cpp -o viterbi`
 
+6.
+repeatMask.merged.bed has to be generated from repeat mask annotation in UCSC table browser then merge,
+mergeBed -i <repeatmask.bed> > HMM/repeatMask.merged.bed
+
+7. fai file has to be in the same dir as asm.fa
+
 Finally can run the snakefile
 `snakemake -p -s <script_dir(HMM)>/markovCNVhunter.snakefile -j <threads> --config subread=<0/1> asm=<hg38.fa/asm.fa> bam=<Genome.bam> t=<threads> MQ=<min_mapq_for_reads> script_dir=<script_dir(HMM)>`
