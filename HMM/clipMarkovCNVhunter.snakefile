@@ -25,7 +25,8 @@ filt=int(config["subread"])
 threads=config["t"]
 mapQ=config["MQ"]
 outdir="hmm"
-    
+
+min_collapse_size=config['min_collapse_size']
 
 #hg38.fai for alignments  # needs to mask using lc.bed 
 
