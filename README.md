@@ -29,6 +29,8 @@ conda install can be used to further add packages to <proj> environment with exp
  
 `conda install -n <proj_env>  scipy=0.15.0`
 
+4.
+
 always activate the env before attempting a run
 `conda activate <proj_env>`
 
