@@ -1,0 +1,82 @@
+#!/usr/bin/env python
+
+
+import os
+import sys
+import argparse
+import subprocess
+DIR = os.path.dirname( os.path.realpath(__file__) )
+CWD = os.getcwd()
+
+parser = argparse.ArgumentParser(description="",
+usage="""hmcnc <command> [<args>]
+Hidden Markov Copy Number Caller commands options:
+	aln	Run a denovo assembly.
+	asm	Run a reference alignment.
+""")
+parser.add_argument("command", help="aln Vs asm, choices=["aln", "asm"])
+#parser.add_argument('--version', action='version', version='%(prog)s 1.0.0')
+mode = parser.parse_args(sys.argv[1:2])
+
+
+
+if (mode.command == "asm"):
+    parser = argparse.ArgumentParser(description=f"hmcnc {mode.command}", formatter_class=argparse.ArgumentDefaultsHelpFormatter, usage='''
+		hmcnc asm --input <input.bam)> [<args>]
+		Run HMM caller on assembly." ''')
+
+    parser.add_argument("--bam" ,help="Bam file of Assembly, index file should be in same dir.")
+    parser.add_argument("--mq", help="Min MapQ for reads", default=10)
+    parser.add_argument("--outdir", help="Output directory")
+    parser.add_argument("--configfile", help="provide config json ",default=None)
+
+if (mode.command == "aln"):
+    parser = argparse.ArgumentParser(description=f"hmcnc {mode.command}", formatter_class=argparse.ArgumentDefaultsHelpFormatter, usage='''
+    	hmcnc aln --input <input.bam)> [<args>]
+    	Run HMM caller on alignment. If available, provide repeat mask annotation (--repeatMask, -r) for the reference used to filter >80% repeat content calls." ''')
+
+    parser.add_argument("--bam" ,help="Bam file of Alignment, index file should be in same dir.")
+    parser.add_argument("--mq", help="Min MapQ for reads", default=10)
+    parser.add_argument("--outdir", help="Output directory")
+    parser.add_argument("--configfile", help="provide config json ",default=None)
+
+    parser.add_argument("--repeatMask",help="Provide reference based repeat bed file.", default=None)
+
+parser.add_argument("--coverage", help="Provide genome-wide coverage, if not specified, caller will calculate mean coverage per contig.",default=None)
+parser.add_argument("--subread", help="[1|0], Needs subreads filtering or not.(PacBio clr reads)" ,default=0)
+parser.add_argument("-t", "--threads", help="Threads available", default=1, type=int)
+
+SMK = f"{DIR}/HMM/caller.smk"
+SCR = "{DIR}/HMM/"
+
+args, snakeargs = parser.parse_known_args(sys.argv[2:])
+
+
+
+if(not os.path.exists(args.bam + ".fai")):
+	parser.error(f'{args.bam} must be indexed, try samtools faidx {args.bam}')
+
+
+# create snakemake command
+cmd=f'''cd {DIR}/envs && source {DIR}/envs/env_python3.sh && cd {CWD} \
+&& snakemake -p -j {args.threads} -s {SMK} \
+'''
+
+
+
+snakeargs = " ".join(snakeargs)
+if(len(snakeargs) > 0):
+	sys.stderr.write(f"Extra arguments passed to snakemake: {snakeargs}\n\n")
+	cmd += f" {snakeargs} "
+
+# add configuration options from argparse
+cmd += " --config "
+for arg in vars(args):
+    val = getattr(args, arg)
+    if(val is not None):
+        cmd += f'{arg}={val} '
+cmd += f' scr={SCR}'
+
+# execute snakemake
+sys.stderr.write(cmd+"\n")
+subprocess.call(cmd, shell=True)
