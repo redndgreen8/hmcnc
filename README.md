@@ -1,4 +1,4 @@
-# hidden markov CNV caller (hmCNC)
+# hmcnc - Hidden Markov Copy Number Caller 
 ## HMM tools
 ### pipeline for calling CNVs in assemblies or alignments
  
