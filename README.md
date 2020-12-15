@@ -55,9 +55,9 @@ viterbi.cpp needs boost to compile
 
 `./hmcnc`
 
-`usage: hmcnc <command> [<args>]
+`usage: hmcnc <command> [<args>]`
 
-Hidden Markov Copy Number Caller command options:
+`Hidden Markov Copy Number Caller command options:
 
 	asm:   Run a denovo assembly.
 	
