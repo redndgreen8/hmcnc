@@ -1,4 +1,4 @@
-# markov CNV hunter
+# hmcnc - Hidden Markov Copy Number Caller 
 ## HMM tools
 ### pipeline for calling CNVs in assemblies or alignments
  
@@ -28,6 +28,8 @@ gcc
 conda install can be used to further add packages to <proj> environment with explicit version numbers.
  
 `conda install -n <proj_env>  scipy=0.15.0`
+
+4.
 
 always activate the env before attempting a run
 `conda activate <proj_env>`
