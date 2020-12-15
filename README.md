@@ -3,6 +3,9 @@
 
 ---
  
+![HMM model](pre_hmm.model.png)
+
+---
 Initially the required packages need to be installed.
 On our linux cluster the easiest package management software is Anaconda/Miniconda. 
 
