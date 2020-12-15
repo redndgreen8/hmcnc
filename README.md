@@ -59,9 +59,9 @@ viterbi.cpp needs boost to compile
 
 Hidden Markov Copy Number Caller command options:
 
-	`asm:   Run a denovo assembly.
+	`asm:   Run a denovo assembly.`
 	
-	 aln:   Run a reference alignment.`
+	 `aln:   Run a reference alignment.`
 	
 ### Alignment
 
