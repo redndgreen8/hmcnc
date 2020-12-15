@@ -79,8 +79,8 @@ Run HMM caller on alignment. If available, provide repeat mask annotation (--rep
 `./hmcnc aln`
 
 `required arguments:`
--  --bam BAM             Bam file of Alignment, index file should be in same dir. (default: None)
--  --index INDEX         index file of reference (default: None)
+-  --bam BAM             Bam file of Alignment, bam index file should be in same dir. (default: None)
+-  --index INDEX         index file of reference/assembly coordinates (default: None)
 
 
 `optional arguments:`
