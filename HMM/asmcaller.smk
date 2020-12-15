@@ -14,6 +14,7 @@ RD = config["scr"]
 
 
 #configfile: config["configfile"]
+
 if config["outdir"]==".":
     outdir="hmm"
 else:
@@ -27,15 +28,12 @@ bamm = bamt.split("/")[-1]
 prefix_bam = os.path.splitext(bamm)[0]
 
 
-ep=config["epsi"]
-
+ep=config['epsi']
 
 cov=config["coverage"]
-mask=config["repeatMask"]
-
 sub=config["subread"]
 mq=config["mq"]
-ml=config["minL"]
+
 
 rule all:
     input:
@@ -51,17 +49,14 @@ rule all:
         call=expand("{outdir}/DUPcalls.copy_number.tsv",outdir=outdir),
         delcall=expand("{outdir}/DELcalls.copy_number.tsv",outdir=outdir),
 
-        maskedcall=expand("{outdir}/DUPcalls.masked_CN.tsv",outdir=outdir),
+    #    maskedcall="{outdir}/DUPcalls.masked_CN.tsv",
     #    inter="{outdir}/DUPcalls.rep_int.bed",
 
-        compCall=expand("{outdir}/DUPcalls.composite.bed",outdir=outdir),
-        maskedCompcall=expand("{outdir}/DUPcalls.masked_CN.composite.tsv",outdir=outdir),
+        compCall=expand("{outdir}/DUPcalls.FINAL.composite.bed",outdir=outdir),
+    #    maskedCompcall="{outdir}/DUPcalls.masked_CN.composite.tsv",
     #    interC="{outdir}/DUPcalls.rep_int.composite.bed",
 
-        plot=expand("{outdir}/{bm}.noclip.{ep}.pdf",bm=prefix_bam,outdir=outdir,ep=ep),
-        sumcall=expand("{outdir}/CallSummary.{ep}.tsv",outdir=outdir,ep=ep),
-        Vsumcall=expand("{outdir}/CallSummary.verbose.{ep}.tsv",outdir=outdir,ep=ep),
-
+        plot=expand("{outdir}/{bm}.noclip.pdf",bm=prefix_bam,outdir=outdir),
 
 rule MakeCovBed:
     input:
@@ -97,7 +92,7 @@ else:
         params:
             sd=SD,
         shell:"""
-#{params.sd}/RemoveRedundantSubreads.py --input {input.bed} |sort -k1,1 -k2,2n > {output.covbed}
+    #{params.sd}/RemoveRedundantSubreads.py --input {input.bed} |sort -k1,1 -k2,2n > {output.covbed}
 
            cat {input.bed} | python {params.rd}/filter.subread.py --mapq {mapQ} |sort -k1,1 -k2,2n > {output.covbed}
     """
@@ -112,7 +107,7 @@ rule MakeIntersect:
         rd=RD,
         asm=config['index'],
     shell:"""
-bedtools makewindows -b <( awk 'BEGIN {{OFS="\\t"}} {{print $1,0,$2}} ' {params.asm}.fai ) -w 100 | intersectBed -v -a stdin -b {params.rd}/annotation/lc.bed {params.rd}/annotation/hg38.telomere.extended.bed {params.rd}/annotation/gap.bed {params.rd}/annotation/centromere.bed |bedtools sort > {output.windows}
+bedtools makewindows -b <( awk 'BEGIN {{OFS="\\t"}} {{print $1,0,$2}} ' {params.asm}) -w 100  |bedtools sort > {output.windows}
 
 intersectBed -sorted -c -a {output.windows} -b {input.covbed}| bgzip -c > {output.bins}
 tabix -C {output.bins}
@@ -131,7 +126,7 @@ if cov !="No":
             rd=RD,
             cove={cov},
         shell:"""
-    echo '{params.cove}' > {output.avg}
+    echo {params.cove}> {output.avg}
     """
 else:
     rule GetMeanCoverage:
@@ -156,11 +151,10 @@ rule RunVitter:
         contig_prefix="{contig}",
         eps={ep},
     shell:"""
-echo {params.contig_prefix}
 mean=$(cat {input.avg})
 touch {output.cov}
 tabix {input.bins} {wildcards.contig} | cut -f 4 | \
-  /scratch2/rdagnew/hmmnew/viterbi4  /dev/stdin $mean {outdir}/{params.contig_prefix} 100 {params.eps}
+  /scratch2/rdagnew/hmmnew/viterbi3  /dev/stdin $mean {outdir}/{params.contig_prefix} 100 {params.eps}
 
 """
 ## viterbi params ?
@@ -241,84 +235,22 @@ awk '$4>2' {output.int} > {output.call}
 
 """
 
-#print(mask)
-if mask != "No":
-    rule repeatMask:
-        input:
-            call="{outdir}/DUPcalls.copy_number.tsv",
-        output:
-            maskedcall="{outdir}/DUPcalls.masked_CN.tsv",
-            inter="{outdir}/DUPcalls.rep_int.bed",
-        params:
-            rep=config['repeatMask'],
-            mnl=config["minL"],
-            rd=RD,
-        shell:"""
 
-        intersectBed -wa -wb -a <( awk '$4>2' {input.call} |cut -f 1-3) -b {params.rep} |sort -k1,1 -k2,2n | python {params.rd}/repeatMask.py | groupBy -g 1,2,3,10 -c 9| awk 'BEGIN{{OFS="\t"}} $6=$5/$4' > {output.inter}
-
-    intersectBed -v -a <( awk '$4>2' {input.call} |cut -f 1-3) -b {params.rep} |awk 'BEGIN{{OFS="\t"}}{{print$1,$2,$3,$3-$2,0,0}}'>>{output.inter}
-
-    intersectBed -wa -wb -a <(awk '$6<0.8' {output.inter} ) -b <( awk '$4>2' {input.call} ) |awk 'BEGIN{{OFS="\t"}} {{print $1,$2,$3,$10,$6;}}'|awk '$3-$2>{params.mnl}' > {output.maskedcall}
-    """
-
-else:
-    rule repeatMask0:
-        input:
-            call="{outdir}/DUPcalls.copy_number.tsv",
-        output:
-            maskedcall="{outdir}/DUPcalls.masked_CN.tsv",
-        params:
-            rd=RD,
-        shell:"""
-        cp {input.call} {output.maskedcall}
-        """
 
 
 rule compositeCall:
     input:
         call="{outdir}/DUPcalls.copy_number.tsv",
     output:
-        compCall="{outdir}/DUPcalls.composite.bed",
+        compCall="{outdir}/DUPcalls.FINAL.composite.bed",
     params:
         rd=RD,
         asm=config["index"],
-        mnl=config["minL"],
     shell:"""
-mergeBed -i  {input.call} |sort -k1,1 -k2,2n |intersectBed -wb -b stdin -a {input.call} |groupBy -g 5,6,7 -c 2,3,4 -o collapse,collapse,collapse|awk '$3-$2 >{params.mnl}' >{output.compCall}
+mergeBed -i  {input.call} |sort -k1,1 -k2,2n |intersectBed -wb -b stdin -a {input.call} |groupBy -g 6,7,8 -c 2,4,5 -o collapse,collapse,collapse|awk '$3-$2 >15000' >{output.compCall}
 """
 
-if mask != "No":
-#    repp=config["repeatMask"] #"{RD}/annotation/repeatMask.merged.bed",
-    rule repeatMask2:
-        input:
-            call="{outdir}/DUPcalls.composite.bed",
-        output:
-            maskedCompcall="{outdir}/DUPcalls.masked_CN.composite.tsv",
-            interC="{outdir}/DUPcalls.rep_int.composite.bed",
-        params:
-            rep=config["repeatMask"],
-            rd=RD,
-        shell:"""
 
-        intersectBed -wa -wb -a <( cat {input.call} |cut -f 1-3) -b {params.rep} |sort -k1,1 -k2,2n | python {params.rd}/repeatMask.py | groupBy -g 1,2,3,10 -c 9| awk 'BEGIN{{OFS="\t"}} $6=$5/$4' > {output.interC}
-
-    intersectBed -v -a <( cat {input.call} |cut -f 1-3) -b {params.rep} |awk 'BEGIN{{OFS="\t"}}{{print$1,$2,$3,$3-$2,0,0}}'>>{output.interC}
-
-    intersectBed -wa -wb -a <(awk '$6<0.8' {output.interC} ) -b <( cat {input.call} ) |awk 'BEGIN{{OFS="\t"}} {{print $7,$8,$9,$10,$12,$6;}}' > {output.maskedCompcall}
-    """
-
-else:
-    rule repeatMask3:
-        input:
-            call="{outdir}/DUPcalls.copy_number.tsv",
-        output:
-            maskedcall="{outdir}/DUPcalls.masked_CN.tsv",
-        params:
-            rd=RD,
-        shell:"""
-        cp {input.call} {output.maskedcall}
-        """
 
 
 
@@ -328,27 +260,13 @@ rule PlotBins:
         #aln=config["aln"],
         avg="{outdir}/mean_cov.txt",
     output:
-        plot="{outdir}/{prefix_bam}.noclip.{ep}.pdf",
+        plot="{outdir}/{prefix_bam}.noclip.pdf",
     params:
         rd=RD,
         genome_prefix="{prefix_bam}",
     shell:"""
 touch {output.plot}
 #plot every 50000 points ~ 5MB
-$sum/../anaconda3/bin/Rscript {params.rd}/plot.HMM.noclip.R {input.allCN} {params.genome_prefix} 50000 {input.avg}
+#Rscript {params.rd}/plot.HMM.noclip.R {input.allCN} {params.genome_prefix} 50000 {input.avg}
 touch {output.plot}
 """
-
-
-
-
-rule callSummary:
-    input:
-        call="{outdir}/DUPcalls.masked_CN.tsv",
-    output:
-        sumcall="{outdir}/CallSummary.{ep}.tsv",
-        Vsumcall="{outdir}/CallSummary.verbose.{ep}.tsv",
-    shell:"""
-sort -k4,4n {input.call}|awk 'BEGIN{{OFS="\t"}} $6=$3-$2' -|groupBy -g 4 -c 4,6 -o count,mean>{output.sumcall}
-sort -k1,1 -k4,4n {input.call}|awk 'BEGIN{{OFS="\t"}} $6=$3-$2' -|groupBy -g 1,4 -c 4,6 -o count,mean> {output.Vsumcall}
-    """
