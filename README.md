@@ -52,7 +52,9 @@ viterbi.cpp needs boost to compile
 6. fai file has to be in the same dir as asm.fa / hg38.fa
 
 ## Running program
+
 `./hmcnc`
+
 usage: hmcnc <command> [<args>]
 Hidden Markov Copy Number Caller command options:
 	asm:   Run a denovo assembly.
@@ -60,7 +62,9 @@ Hidden Markov Copy Number Caller command options:
 hmcnc: error: the following arguments are required: command`
 
 ### Alignment
+
 `./hmcnc aln -h`
+
 usage:
     	hmcnc aln --bam <input.bam)> --index <ref.index> [<args>]
     	Run HMM caller on alignment. If available, provide repeat mask annotation (--repeatMask, -r) for the reference used to filter >80 precent repeat content calls."
@@ -81,8 +85,10 @@ optional arguments:
                         Threads available (default: 1)
   --epsi EPSI           epsilon parameter (default: 90)
   --minL MINL           min collapse length (default: 15000)
-  --scr SCR             Scripts DIR (default: /scratch2/rdagnew/hmmnew/snakemake)`
+  --scr SCR             Scripts DIR (default: /scratch2/rdagnew/hmmnew/snakemake)
   
- ### Assembly 
- Same as above but without repeat mask step.
+
+### Assembly 
+
+Same as above but without repeat mask step.
 
