@@ -56,11 +56,13 @@ viterbi.cpp needs boost to compile
 `./hmcnc`
 
 `usage: hmcnc <command> [<args>]
-Hidden Markov Copy Number Caller command options:
-	asm:   Run a denovo assembly.
-	aln:   Run a reference alignment.
-hmcnc: error: the following arguments are required: command`
 
+Hidden Markov Copy Number Caller command options:
+
+	asm:   Run a denovo assembly.
+	
+	aln:   Run a reference alignment.`
+	
 ### Alignment
 
 `./hmcnc aln -h`
