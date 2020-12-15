@@ -63,7 +63,6 @@ viterbi.cpp needs boost to compile
 Hidden Markov Copy Number Caller command options:
 
 `asm:   Run a denovo assembly.
-
 aln:   Run a reference alignment.`
 	
 ### Alignment
@@ -92,7 +91,7 @@ Run HMM caller on alignment. If available, provide repeat mask annotation (--rep
 -  -t THREADS, --threads THREADS      Threads available (default: 1)
 -  --epsi EPSI           epsilon parameter (default: 90)
 -  --minL MINL           min collapse length (default: 15000)
--  --scr SCR             Scripts DIR (default: /scratch2/rdagnew/hmmnew/snakemake)`
+-  --scr SCR             Scripts DIR (default: /scratch2/rdagnew/hmmnew/snakemake)
   
 
 ### Assembly 
