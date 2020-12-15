@@ -97,5 +97,7 @@ Run HMM caller on alignment. If available, provide repeat mask annotation (--rep
 
 ### Assembly 
 
+`./hmcnc asm`
+
 Same as above but without repeat mask step.
 
