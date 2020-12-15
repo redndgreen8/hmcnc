@@ -16,12 +16,14 @@ https://docs.conda.io/projects/conda/en/latest/user-guide/install/linux.html
 3. Project env - There are many ways to do this but you can set up a project specific environment with all the packages you need.
 https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-with-commands
 
+#### Required packages
 bedtools
 samtools
 snakemake
 boost
 R 
 gcc
+tabix
 
 `conda create --name <proj_env> bedtools samtools snakemake boost gcc=7.3.0`
 
@@ -38,18 +40,15 @@ you might run into a conda init error the first time so run conda init and rerun
 
 
 5.
-SamToBed can be compiled: g++ -02 SamToBed.cpp -o samToBed
+SamToBed can be compiled: 
+
+`g++ -02 SamToBed.cpp -o samToBed`
 
 viterbi.cpp needs boost to compile
 
-`g++ -W -I {boost_install}/boost/include/ viterbi.cpp -o viterbi`
+`g++ -W -I {boost_install}/boost/include/ viterbi.noclip.cpp -o viterbi`
 
-6.
-repeatMask.merged.bed has to be generated from repeat mask annotation in UCSC table browser then merge,
-`mergeBed -i <repeatmask.bed> > HMM/repeatMask.merged.bed`
+6. fai file has to be in the same dir as asm.fa / hg38.fa
 
-7. fai file has to be in the same dir as asm.fa
-
-Finally can run the snakefile:
-
+## Running program
 `snakemake -p -s <script_dir(HMM)>/markovCNVhunter.snakefile -j <threads> --config subread=<0/1> asm=<hg38.fa/asm.fa> bam=<Genome.bam> t=<threads> MQ=<min_mapq_for_reads> script_dir=<script_dir(HMM)>`
