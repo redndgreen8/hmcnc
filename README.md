@@ -26,7 +26,7 @@ https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environme
 - gcc
 - tabix
 
-`conda create --name <proj_env> bedtools samtools snakemake boost gcc=7.3.0`
+`conda create --name <proj_env> bedtools samtools snakemake boost R gcc=7.3.0`
 
 conda install can be used to further add packages to <proj> environment with explicit version numbers.
  
@@ -49,7 +49,7 @@ viterbi.cpp needs boost to compile
 
 `g++ -W -I {boost_install}/boost/include/ viterbi.noclip.cpp -o viterbi`
 
-6. fai file has to be in the same dir as asm.fa / hg38.fa
+6. fai file has to be in the same dir as asm.fa / hg38.fa / reference.fa
 
 ## Running program
 
