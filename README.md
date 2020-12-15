@@ -101,3 +101,15 @@ Run HMM caller on alignment. If available, provide repeat mask annotation (--rep
 
 Same as above but without repeat mask step.
 
+## Main Output
+
+- coverage.bins.bed.gz (coverage in 100bp windows)
+- copy_number.tsv (copy number profile of whole genome)
+- DUPcalls.copy_number.tsv
+- DUPcalls.masked_CN.tsv
+- DUPcalls.composite.bed
+- DUPcalls.masked_CN.composite.tsv
+- {GENOME}.noclip.pdf (plot of coverage and copy number across WG)
+- DELcalls.copy_number.tsv
+
+
