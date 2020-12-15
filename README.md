@@ -65,15 +65,15 @@ hmcnc: error: the following arguments are required: command`
 
 `./hmcnc aln -h`
 
-`usage:
+`usage:`
 
-    	hmcnc aln --bam <input.bam)> --index <ref.index> [<args>]
+`    	hmcnc aln --bam <input.bam)> --index <ref.index> [<args>]`
 
-Run HMM caller on alignment. If available, provide repeat mask annotation (--repeatMask, -r) for the reference used to filter >80 precent repeat content calls."`
+`Run HMM caller on alignment. If available, provide repeat mask annotation (--repeatMask, -r) for the reference used to filter >80 precent repeat content calls."`
 
 `hmcnc aln`
 
-`optional arguments:
+`optional arguments:`
   -h, --help            show this help message and exit
   --bam BAM             Bam file of Alignment, index file should be in same dir. (default: None)
   --mq MQ               Min MapQ for reads (default: 10)
