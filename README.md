@@ -10,14 +10,18 @@ Initially the required packages need to be installed.
 On our linux cluster the easiest package management software is Anaconda/Miniconda. 
 
 1. Download shell script (64bit):
+
 https://docs.conda.io/en/latest/miniconda.html#linux-installers
 
 2. Run script
+
 `bash Miniconda3-latest-Linux-x86_64.sh`
+
 https://docs.conda.io/projects/conda/en/latest/user-guide/install/linux.html
 
 
 3. Project env - There are many ways to do this but you can set up a project specific environment with all the packages you need.
+
 https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-with-commands
 
 ### Required packages
@@ -38,6 +42,7 @@ conda install can be used to further add packages to <proj> environment with exp
 4.
 
 Always activate the env before attempting a run
+
 `conda activate <proj_env>`
 
 You might run into a conda init error the first time so run conda init and rerun
@@ -48,9 +53,9 @@ SamToBed can be compiled:
 
 `g++ -02 SamToBed.cpp -o samToBed`
 
-viterbi.cpp needs boost to compile
+viterbi.noclip.cpp needs boost to compile
 
-`g++ -W -I {boost_install}/boost/include/ viterbi.noclip.cpp -o viterbi`
+`g++ -W -I {anaconda install}/envs/{proj_env}/include viterbi.noclip.cpp -o viterbi`
 
 6. fai file has to be in the same dir as asm.fa / hg38.fa / reference.fa
 
