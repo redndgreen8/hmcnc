@@ -20,7 +20,7 @@ if config["outdir"]==".":
 else:
     outdir=config["outdir"]+"/hmm"
 
-fai= open(config["index"]+".fai")
+fai= open(config["index"])
 
 contigs = [l.split()[0].strip().replace("|","_") for l in fai]
 bamt = config["bam"]
@@ -33,6 +33,7 @@ ep=config['epsi']
 cov=config["coverage"]
 sub=config["subread"]
 mq=config["mq"]
+ml=config["minL"]
 
 
 rule all:
@@ -56,7 +57,10 @@ rule all:
     #    maskedCompcall="{outdir}/DUPcalls.masked_CN.composite.tsv",
     #    interC="{outdir}/DUPcalls.rep_int.composite.bed",
 
-        plot=expand("{outdir}/{bm}.noclip.pdf",bm=prefix_bam,outdir=outdir),
+        plot=expand("{outdir}/{bm}.noclip.{ep}.pdf",bm=prefix_bam,outdir=outdir),
+        sumcall=expand("{outdir}/CallSummary.{ep}.tsv",outdir=outdir,ep=ep),
+        Vsumcall=expand("{outdir}/CallSummary.verbose.{ep}.tsv",outdir=outdir,ep=ep),
+
 
 rule MakeCovBed:
     input:
@@ -154,7 +158,7 @@ rule RunVitter:
 mean=$(cat {input.avg})
 touch {output.cov}
 tabix {input.bins} {wildcards.contig} | cut -f 4 | \
-  /scratch2/rdagnew/hmmnew/viterbi3  /dev/stdin $mean {outdir}/{params.contig_prefix} 100 {params.eps}
+  /scratch2/rdagnew/hmmnew/viterbi  /dev/stdin $mean {outdir}/{params.contig_prefix} 100 {params.eps}
 
 """
 ## viterbi params ?
