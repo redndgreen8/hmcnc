@@ -160,7 +160,7 @@ echo {params.contig_prefix}
 mean=$(cat {input.avg})
 touch {output.cov}
 tabix {input.bins} {wildcards.contig} | cut -f 4 | \
-  /scratch2/rdagnew/hmmnew/viterbi4  /dev/stdin $mean {outdir}/{params.contig_prefix} 100 {params.eps}
+  {params.rd}/viterbi  /dev/stdin $mean {outdir}/{params.contig_prefix} 100 {params.eps}
 
 """
 ## viterbi params ?
