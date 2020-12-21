@@ -126,5 +126,6 @@ Same as above but without repeat mask step.
 - DUPcalls.masked_CN.composite.tsv
 - {GENOME}.noclip.pdf (plot of coverage and copy number across WG)
 - DELcalls.copy_number.tsv (del calls are naturally recovered)
+- CallSummary.tsv
 
 
