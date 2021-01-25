@@ -48,13 +48,15 @@ Always activate the env before attempting a run
 You might run into a conda init error the first time so run conda init and rerun
 
 
-5. Compiling cpp source files
+5. 
+
+Compiling cpp source files
 
 You can run the snakemake based make file:
 
 `snakemake -s make.smk.py --config boost=<boost>`
 
-where `<boost>` is the location of boost install/include folder. 
+where `<boost>` is the location of boost_install/include folder. 
 
 Most likely `{anaconda install}/envs/{proj_env}/include`.
 
