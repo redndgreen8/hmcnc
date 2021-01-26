@@ -36,15 +36,15 @@ if (mode.command == "asm"):
 if (mode.command == "aln"):
     parser = argparse.ArgumentParser(description=f"hmcnc {mode.command}", formatter_class=argparse.ArgumentDefaultsHelpFormatter, usage='''
     	hmcnc aln --bam <input.bam)> --index <ref.index> [<args>]
-    	Run HMM caller on alignment. If available, provide repeat mask annotation (--repeatMask, -r) for the reference used to filter >80 precent repeat content calls." ''')
+    	Run HMM caller on alignment. If available, provide repeat mask annotation (--repeatMask, -r) for the reference used (annotation/repeatMask.merged.bed for human) to filter >80 precent repeat content calls." ''')
 
     parser.add_argument("--bam" ,help="Bam file of Alignment, index file should be in same dir.",required=True)
     parser.add_argument("--mq", help="Min MapQ for reads", default=10)
     parser.add_argument("--outdir", help="Output directory",default=".")
 #    parser.add_argument("--configfile", help="provide config json ")
-    parser.add_argument("--index",help="index file of reference",required=True)
+    parser.add_argument("--index",help="index file of reference",default="HMM/annotation/hg38.fa.fai")
 
-    parser.add_argument("--repeatMask",help="Provide reference based repeat bed file.", default="No")
+    parser.add_argument("--repeatMask",help="Provide reference based repeat bed file.", default="HMM/annotation/repeatMask.merged.bed")
     SMK = f"{DIR}/caller.smk"
 
 
@@ -56,7 +56,7 @@ parser.add_argument("--minL", help="min collapse length", default=15000, type=in
 
 
 #SMK = f"{DIR}/caller.smk"
-parser.add_argument("--scr",  help="Scripts DIR",required=True )
+parser.add_argument("--scr",  help="Scripts DIR",default="HMM" )
 
 
 
