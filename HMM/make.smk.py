@@ -29,7 +29,7 @@ rule stb:
 		samtobed="samToBed",
 	shell:"""
 
-		g++ -02 {input.sTb} -o {output.samtobed}
+		g++ -O2 {input.sTb} -o {output.samtobed}
 """
 
 
@@ -39,10 +39,10 @@ rule vit:
 	output:
 		samtobed="viterbi",
 	params:
-		proj_env=boost,
+		proj_env={boost},
 
 	shell:"""
-g++ -W -I {proj_env}/include {input.vitt} -o {samtobed}
+g++ -W -I {params.proj_env} {input.vitt} -o {output.samtobed}
 """
 
 
