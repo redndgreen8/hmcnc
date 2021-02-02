@@ -5,10 +5,13 @@ import os.path
 import json
 
 # Snakemake and working directories
-SD = os.path.dirname(workflow.snakefile)
-
+#SD = os.path.dirname(workflow.snakefile)
+#print(SD)
 
 RD = config["scr"]
+
+ASM=RD+"/annotation/hg38.fa.fai"
+REP=RD+"/annotation/repeatMask.merged.bed"
 
 #config("hmm_caller.json")
 
@@ -19,10 +22,14 @@ if config["outdir"]==".":
 else:
     outdir=config["outdir"]+"/hmm"
 
-fai= open(config["index"]+".fai")
+fai= open(ASM)
 
 contigs = [l.split()[0].strip().replace("|","_") for l in fai]
-bamt = config["bam"]
+
+#fofn
+
+bamt =  config["bam"]
+
 bamm = bamt.split("/")[-1]
 prefix_bam = os.path.splitext(bamm)[0]
 
@@ -31,7 +38,7 @@ ep=config["epsi"]
 
 
 cov=config["coverage"]
-mask=config["repeatMask"]
+#mask=config["repeatMask"]
 
 sub=config["subread"]
 mq=config["mq"]
@@ -95,11 +102,11 @@ else:
         output:
             covbed="{outdir}/cov.no_subread.bed",
         params:
-            sd=SD,
+            rd=RD,
+            mapq={mq},
         shell:"""
-#{params.sd}/RemoveRedundantSubreads.py --input {input.bed} |sort -k1,1 -k2,2n > {output.covbed}
 
-           cat {input.bed} | python {params.rd}/filter.subread.py --mapq {mapQ} |sort -k1,1 -k2,2n > {output.covbed}
+           cat {input.bed} | python {params.rd}/filter.subread.py --mapq {params.mapq} |sort -k1,1 -k2,2n > {output.covbed}
     """
 
 rule MakeIntersect:
@@ -110,9 +117,9 @@ rule MakeIntersect:
         bins=protected("{outdir}/coverage.bins.bed.gz"),
     params:
         rd=RD,
-        asm=config['index'],
+        asm=ASM,#config['index'],
     shell:"""
-bedtools makewindows -b <( awk 'BEGIN {{OFS="\\t"}} {{print $1,0,$2}} ' {params.asm}.fai ) -w 100 | intersectBed -v -a stdin -b {params.rd}/annotation/lc.bed {params.rd}/annotation/hg38.telomere.extended.bed {params.rd}/annotation/gap.bed {params.rd}/annotation/centromere.bed |bedtools sort > {output.windows}
+bedtools makewindows -b <( awk 'BEGIN {{OFS="\\t"}} {{print $1,0,$2}} ' {params.asm} ) -w 100 | intersectBed -v -a stdin -b {params.rd}/annotation/lc.bed {params.rd}/annotation/hg38.telomere.extended.bed {params.rd}/annotation/gap.bed {params.rd}/annotation/centromere.bed |bedtools sort > {output.windows}
 
 intersectBed -sorted -c -a {output.windows} -b {input.covbed}| bgzip -c > {output.bins}
 tabix -C {output.bins}
@@ -240,7 +247,7 @@ awk '$4<2' {output.int} > {output.delcall}
 awk '$4>2' {output.int} > {output.call}
 
 """
-
+mask="Yes"
 #print(mask)
 if mask != "No":
     rule repeatMask:
@@ -250,7 +257,7 @@ if mask != "No":
             maskedcall="{outdir}/DUPcalls.masked_CN.tsv",
             inter="{outdir}/DUPcalls.rep_int.bed",
         params:
-            rep=config['repeatMask'],
+            rep=REP,#config['repeatMask'],
             mnl=config["minL"],
             rd=RD,
         shell:"""
@@ -282,12 +289,14 @@ rule compositeCall:
         compCall="{outdir}/DUPcalls.composite.bed",
     params:
         rd=RD,
-        asm=config["index"],
+        asm=ASM,#config["index"],
         mnl=config["minL"],
     shell:"""
 mergeBed -i  {input.call} |sort -k1,1 -k2,2n |intersectBed -wb -b stdin -a {input.call} |groupBy -g 5,6,7 -c 2,3,4 -o collapse,collapse,collapse|awk '$3-$2 >{params.mnl}' >{output.compCall}
 """
 
+
+mask="Yes"
 if mask != "No":
 #    repp=config["repeatMask"] #"{RD}/annotation/repeatMask.merged.bed",
     rule repeatMask2:
@@ -297,7 +306,7 @@ if mask != "No":
             maskedCompcall="{outdir}/DUPcalls.masked_CN.composite.tsv",
             interC="{outdir}/DUPcalls.rep_int.composite.bed",
         params:
-            rep=config["repeatMask"],
+            rep=REP,#config["repeatMask"],
             rd=RD,
         shell:"""
 

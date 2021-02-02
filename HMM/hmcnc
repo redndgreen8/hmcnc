@@ -10,9 +10,11 @@ CWD = os.getcwd()
 
 parser = argparse.ArgumentParser(description="",
 usage="""hmcnc <command> [<args>]
+
 Hidden Markov Copy Number Caller command options:
 	asm:   Run a denovo assembly.
 	aln:   Run a reference alignment.
+
 """)
 parser.add_argument("command", help="aln Vs asm", choices=["aln", "asm"])
 #parser.add_argument('--version', action='version', version='%(prog)s 1.0.0')
@@ -36,27 +38,29 @@ if (mode.command == "asm"):
 if (mode.command == "aln"):
     parser = argparse.ArgumentParser(description=f"hmcnc {mode.command}", formatter_class=argparse.ArgumentDefaultsHelpFormatter, usage='''
     	hmcnc aln --bam <input.bam)> --index <ref.index> [<args>]
-    	Run HMM caller on alignment. If available, provide repeat mask annotation (--repeatMask, -r) for the reference used (annotation/repeatMask.merged.bed for human) to filter >80 precent repeat content calls." ''')
+    	
+Run HMM caller on alignment. 
+If available, provide repeat mask annotation (--repeatMask, -r) for the reference used (annotation/repeatMask.merged.bed for human) to filter >80 precent repeat content calls." ''')
 
-    parser.add_argument("--bam" ,help="Bam file of Alignment, index file should be in same dir.",required=True)
+    parser.add_argument("--bam" ,help="File of file names (fofn) with absolute paths for Alignments, index file should be in same dir.",required=True)
     parser.add_argument("--mq", help="Min MapQ for reads", default=10)
-    parser.add_argument("--outdir", help="Output directory",default=".")
+    parser.add_argument("--outdir", help="Output directory",required=True)
 #    parser.add_argument("--configfile", help="provide config json ")
-    parser.add_argument("--index",help="index file of reference",default="HMM/annotation/hg38.fa.fai")
+  #  parser.add_argument("--index",help="index file of reference",default="annotation/hg38.fa.fai")
 
-    parser.add_argument("--repeatMask",help="Provide reference based repeat bed file.", default="HMM/annotation/repeatMask.merged.bed")
+ #   parser.add_argument("--repeatMask",help="Provide reference based repeat bed file.", default="annotation/repeatMask.merged.bed")
     SMK = f"{DIR}/caller.smk"
 
 
 parser.add_argument("--coverage", help="Provide genome-wide coverage, if not specified, caller will calculate mean coverage per contig.",default="No")
-parser.add_argument("--subread", help="[1|0], Needs subreads filtering or not.(PacBio clr reads)" ,default=0)
+parser.add_argument("--subread", help="[1|0], Needs subread filtering or not.(PacBio clr reads)" ,default=0)
 parser.add_argument("-t", "--threads", help="Threads available", default=1, type=int)
 parser.add_argument("--epsi", help="epsilon parameter", default=90, type=float)
 parser.add_argument("--minL", help="min collapse length", default=15000, type=int)
 
 
 #SMK = f"{DIR}/caller.smk"
-parser.add_argument("--scr",  help="Scripts DIR",default="HMM" )
+parser.add_argument("--scr",  help="Scripts DIR",default="." )
 
 
 
@@ -64,10 +68,11 @@ parser.add_argument("--scr",  help="Scripts DIR",default="HMM" )
 args, snakeargs = parser.parse_known_args(sys.argv[2:])
 
 SCR = f"{args.scr}"
+#args.repeatMask=SCR+"/annotation/repeatMask.merged.bed"
+#args.index=SCR+"/annotation/hg38.fa.fai"
 
-
-if(not os.path.exists(str(args.bam) + ".bai")):
-	parser.error(f'{args.bam} must be indexed, try samtools faidx {args.bam}')
+#if(not os.path.exists(str(args.bam) + ".bai")):
+#	parser.error(f'{args.bam} must be indexed, try samtools faidx {args.bam}')
 
 
 # create snakemake command
