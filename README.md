@@ -62,7 +62,6 @@ Most likely `{anaconda install}/envs/{proj_env}/include`.
 
 
 
-6. fai file has to be in the same dir as asm.fa / hg38.fa / reference.fa
 
 ## Running program
 
