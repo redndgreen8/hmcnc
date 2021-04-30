@@ -19,9 +19,9 @@ https://docs.conda.io/en/latest/miniconda.html#linux-installers
 
 https://docs.conda.io/projects/conda/en/latest/user-guide/install/linux.html
 
-`conda config --add channels defaults
-conda config --add channels bioconda
-conda config --add channels conda-forge`
+`conda config --add channels defaults`
+`conda config --add channels bioconda`
+`conda config --add channels conda-forge`
 
 
 3. Project env - There are many ways to do this but you can set up a project specific environment with all the packages you need.
