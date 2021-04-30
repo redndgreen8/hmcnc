@@ -13,11 +13,15 @@ On our linux cluster the easiest package management software is Anaconda/Minicon
 
 https://docs.conda.io/en/latest/miniconda.html#linux-installers
 
-2. Run script
+2. Run script and setup channels
 
 `bash Miniconda3-latest-Linux-x86_64.sh`
 
 https://docs.conda.io/projects/conda/en/latest/user-guide/install/linux.html
+
+`conda config --add channels defaults
+conda config --add channels bioconda
+conda config --add channels conda-forge`
 
 
 3. Project env - There are many ways to do this but you can set up a project specific environment with all the packages you need.
@@ -33,7 +37,7 @@ https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environme
 - gcc
 - tabix
 
-`conda create --name <proj_env> bedtools samtools snakemake boost R gcc=7.3.0`
+`conda create --name <proj_env> bedtools samtools snakemake boost R tabix`
 
 conda install can be used to further add packages to <proj> environment with explicit version numbers.
  
