@@ -20,7 +20,9 @@ https://docs.conda.io/en/latest/miniconda.html#linux-installers
 https://docs.conda.io/projects/conda/en/latest/user-guide/install/linux.html
 
 `conda config --add channels defaults`
+
 `conda config --add channels bioconda`
+
 `conda config --add channels conda-forge`
 
 
