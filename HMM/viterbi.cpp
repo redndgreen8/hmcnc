@@ -8,7 +8,6 @@
 #include <istream>
 #include <cassert>
 #include <cmath>
-#include <random>
 #include <boost/math/distributions/poisson.hpp>
 using boost::math::poisson;
 using boost::math::pdf;
@@ -18,8 +17,23 @@ using std::endl;
 using std::string;
 using std::log;
 
+static void printModel(vector<vector<double> > &transP,
+                       int nStates)
+{
 
-static double max_over_row(vector<vector<double>> &v , size_t col ,size_t nStates ){
+    cout<< "\nTRANS: \n";
+    for (int r=0;r<nStates;r++)
+    {
+        cout<<r<<": ";
+        for (int c=0;c<nStates;c++)
+        {
+            cout<< transP[r][c] << " ";
+        }
+        cout<< "\n";
+    }cout<< "\n";
+}
+
+double max_over_row(vector<vector<double> > &v , size_t col ,size_t nStates ){
 
     double maxi=-1 * (std::numeric_limits<double>::max()) ;
     for(size_t i=0;i< nStates;i++){
@@ -29,7 +43,7 @@ static double max_over_row(vector<vector<double>> &v , size_t col ,size_t nState
 }
 
 
-static double max_over_rows(vector<vector<double>> &v , size_t col ,vector<vector<double>> &v2 , size_t nextState,size_t nStates ){
+double max_over_rows(vector<vector<double> > &v , size_t col ,vector<vector<double> > &v2 , size_t nextState,size_t nStates ){
     double maxi2=-1 * (std::numeric_limits<double>::max()) ;
 
     for(size_t i=0;i< nStates;i++){
@@ -42,8 +56,8 @@ static double max_over_rows(vector<vector<double>> &v , size_t col ,vector<vecto
 double Prpoiss(int cn,  int cov, int Hmean) {
     double result=0;
     const double epsi=1e-99;
-    if(cov > 30.497*Hmean){
-        if(cn!= 31)
+    if(cov > 10.497*Hmean){
+        if(cn!= 11)
             result=epsi;
         else
             result=1-epsi;
@@ -59,48 +73,10 @@ double Prpoiss(int cn,  int cov, int Hmean) {
     return result;
 }
 
-    /*
-double Prclip(int cl, int thr ){
-    double result = 0;
-    if (cl>=thr){
-        result=1-eps;
-    } else {
-        result=eps;
-    }
-    return result;
-}
-
-*/
 
 
-double emissionPr( size_t index, size_t state, vector<size_t> & observations,size_t mean  ){
 
-    int cov = observations[index];
-
-    /*
-     int cov = coverage[index];
-
-     if (as.integer( obs[2])  ==1)
-     {
-     if ( stt[2]  =="1")
-     result=Prpoiss(  as.integer(stt[1]) ,cov,30 ) * Prclip(3,3);
-     else
-     result=Prpoiss( as.integer(stt[1]) ,cov,30  ) * Prclip(0,3);
-     }
-     else
-     {
-     if ( stt[2]  =="1")
-     result=Prpoiss(  as.integer(stt[1]) ,coverage,30  ) * Prclip(0,3);
-     else
-     result=Prpoiss( as.integer(stt[1]) ,coverage,30  ) * Prclip(3,3) ;
-     }
-     */
-
-    double result=Prpoiss( (int) state ,cov, (int) mean );
-    return result;
-}
-
-static void correctModel(vector<vector<double>> &transP,
+static void correctModel(vector<vector<double> > &transP,
                          int nStates)
 {
     double sum;
@@ -108,30 +84,35 @@ static void correctModel(vector<vector<double>> &transP,
     {
         sum = 0;
         for (int j=0;j<nStates;j++)
-            sum+=transP[i][j];
+            sum+= std::exp(transP[i][j]);
         for (int j=0;j<nStates;j++)
-            transP[i][j]/=sum;
+            transP[i][j]= log(std::exp(transP[i][j])/sum);
     }
 }//correctModel
 
 
 void viterbi( vector<double> &startP,
-    vector<vector<double>> &transP,
+    vector<vector<double> > &transP,
+   vector<vector<double> > &emisP,
     vector<size_t> &observations,
     size_t nStates ,
     size_t mean,
-    vector<size_t> &  viterbiPath ,size_t nObservations){
+    vector<size_t> &  viterbiPath ,size_t nObservations, size_t max_obs){
 
     //size_t  nObservations  = observations.size();
-    vector<vector<double>> v(nStates, vector<double>(nObservations)  );
+    vector<vector<double> > v(nStates, vector<double>(nObservations)  );
     // Init
+    size_t obs = std::min(max_obs , observations[0]);
     for(size_t i=0;i<nStates;i++)
     {
-        v[i][0] = log( startP[i] * emissionPr( 0, i , observations,mean) );
+
+        v[i][0] =  startP[i] + emisP[i][obs] ;
     }
 // Iteration
+    
     for(size_t k=1 ; k<nObservations ; k++)
     {
+        size_t obs = std::min(max_obs , observations[k]);
         for(size_t i=0;i<nStates;i++)
         {
             double maxi = -1 * (std::numeric_limits<double>::max());
@@ -141,11 +122,9 @@ void viterbi( vector<double> &startP,
                 maxi = std::max(maxi, temp);
 
             }
-            v[i][k] = log(emissionPr( k,i, observations,mean)) + maxi;
+            v[i][k] = emisP[i][obs] + maxi;
         }
     }
-
-    
 // Traceback
     for(size_t i=0;i<nStates;i++)
     {
@@ -178,11 +157,10 @@ void viterbi( vector<double> &startP,
 
 int main(int argc, const char * argv[]) {
 
-    if (argc < 5) 
-    {
-        std::cerr << "usage: " << argv[0] << " <coverage observation> <scaler> <output prefix> <calculate_mean/provide_mean[0/1]> <Mean D.coverage>" << endl;
-        return EXIT_FAILURE;
-    }
+if (argc != 6) {
+    std::cerr << "usage: " << argv[0] << " <coverage observation> <Diploid mean coverage> <output prefix> <scaler> <epsi>" << endl;
+    return EXIT_FAILURE;
+}
 
     const string prefix_file(argv[3]);
     //const string mean_file(argv[2]);
@@ -209,26 +187,21 @@ int main(int argc, const char * argv[]) {
             max=inputString;
             //      maxi=i;
         }
+        i++;
     }
     file.close();
 
     size_t nObservations=observations.size();
 
-    
-    size_t mean = std::floor( (sum/nObservations)  /2 );
-    if (std::stoi(argv[4])==1){
-        mean=std::floor( std::stoi(argv[5]) /2 );
-    }
-
-
-
+    size_t mean= std::floor( std::stoi(argv[2]) /2 );
+    const size_t calc_mean = std::floor( (sum/nObservations)  /2 );
 /*
     std::ifstream file2;
 
     file2.open(mean_file);
     cout<<"to mean"<<endl;
     double inputmean,mean_tmp;
-    while(file >> inputmean){
+    while(file > > inputmean){
         mean_tmp=inputmean;
         cout<<mean_tmp<<" "<<inputmean<<endl;
     }
@@ -241,21 +214,21 @@ int main(int argc, const char * argv[]) {
     //----------------------------------------------------------------------
 
     //max cov value observed or upper cov bound -> max nState---------------
-    size_t max_obs = std::min( ( (size_t) std::ceil(30.497*mean)) , max);
-    size_t nStates= ((size_t) std::ceil(max_obs/mean))+1;//+1 zeroth state
+    size_t max_obs = std::min( ( (size_t) std::ceil(10.497*mean)) , max);
+    size_t nStates= std::min(  ((int) std::ceil(max_obs/mean)) + 1  ,12   );//+1 zeroth state
 
     cout<<"nstates "<<nStates<<endl;
     cout<<"max_cov "<<max_obs<<endl;
-    cout<<"mean "<<mean<<endl;
+    cout<<"mean "<<mean<<" calc mean "<<calc_mean<<endl;
     //----------------------------------------------------------------------
 
+    mean = calc_mean;
 
-
-    const double epsi=1e-99;
+   // const double epsi=1e-99;
     vector<double> startP(nStates);
 
     for(size_t i=0;i<(nStates);i++){
-            startP[i]=1./(nStates);
+            startP[i]=log(1./(nStates));
     }
 
         // trans prob
@@ -268,54 +241,77 @@ int main(int argc, const char * argv[]) {
 
         double epsi23 = result2/result3;
 
-    /*    poisson distribution3(mean);
+        poisson distribution3(mean);
         double result1=pdf(distribution3, mean);
 
         poisson distribution4(2*mean);
         double result4=pdf(distribution4, mean);
 
         double epsi21 = result4/result1;
-*/
-     //   cout<<"epsi23 "<<epsi23<<" epsi21 "<<epsi21<<endl;
+
+        cout<<"epsi23 "<<epsi23<<" epsi21 "<<epsi21<<endl;
 
 
-//const double input_epsi = std::stod(argv[5]);
-
+const double epsi = std::pow(0.1,std::stoi(argv[5]));
+cout<<"epsi: "<<epsi<<endl;
     //*300
-    const double scale = std::stod(argv[2]);
-    double beta = log(nStates-1) + log(epsi) + (scale * log(epsi23));
+    const double scale = std::stod(argv[4]);
+    const double lepsi=log(epsi);
+
+//no epsi
+    double beta =  lepsi + ( scale * log(epsi23))  ;
                                     //mean no. of bins for cn=3 call
 
 
 
 
-
-    vector<vector<double>> transP(nStates, vector<double>(nStates));
-    for (size_t i=0;i<nStates;i++){
-        for (size_t j=0;j<nStates;j++){
+    vector<vector<double> > transP(nStates, vector<double>(nStates));
+    for (size_t i=0;i<nStates;i++)
+    {
+        for (size_t j=0;j<nStates;j++)
+        {
             if(i==j)
             {
                 transP[i][j]= log(1 - std::exp(beta) );
-
-                //1 - ( ( ((double) (nStates)) -1) * (epsi) );
-        //        cout<<" "<<transP[i][j];
             }
+            
+            
             else
             {
-                //if (i==2 && j==3)
-                transP[i][j]= beta - log(nStates-1);
-                //else if(i==2 && j==1)
-                //    transP[i][j]= epsi * epsi21;
-                ///else
-                //    transP[i][j]=epsi;
-        //        cout<<" "<<transP[i][j];
+                if ( j==3)
+                {
+                    transP[i][j]= beta - log(nStates-1) ;
+
+                }
+                else
+                {
+                    transP[i][j]= beta - log(nStates-1);
+                
+                }
             }
-        }//cout<<endl;
+        }
     }
-//    correctModel(transP,nStates);
+
+    printModel(transP,nStates);
+  //  correctModel(transP,nStates);
+   // printModel(transP,nStates);
+
+
+    vector<vector<double> > emisP(nStates, vector<double>(max_obs+1));
+    for (size_t i=0;i<nStates;i++){
+        for (size_t j=0;j<=max_obs;j++){
+  
+                emisP[i][j]=log(Prpoiss( (int) i , j , (int) mean ));
+
+        }
+    }
+
+
 
     vector<size_t> viterbiPath(nObservations);
-    viterbi(startP, transP, observations, nStates,mean,viterbiPath,nObservations);
+
+
+    viterbi(startP, transP,emisP, observations, nStates,mean,viterbiPath,nObservations,max_obs);
     string v("viterout.txt");
     string filen = prefix_file + "." +v;
 
@@ -326,6 +322,11 @@ int main(int argc, const char * argv[]) {
         output<<viterbiPath[i]<<endl;
     }
     output.close();
+
+
+
+
+
 
 return 0;
 }//main
