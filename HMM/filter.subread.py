@@ -71,8 +71,8 @@ def NonOverlappingAlignedBases(alignmentList):
         l2= alignmentList[r+1]
         c2=coordinate(r_len, int(l2[4]),int(l2[5]),int(l2[6]))
         if c1[0]==c2[0] and c1[1]==c2[1]: #and readname is the same
-                non.add(i)
-                non.add(j)
+                non.add(r)
+#                non.add(r+1)
                 continue
 
     cs = ( span(alignmentList, non), non)
