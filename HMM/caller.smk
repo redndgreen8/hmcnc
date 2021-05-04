@@ -368,7 +368,7 @@ rule GeneCount:
     input:
         call="{outdir}/DUPcalls.masked_CN.composite.tsv",
     output:
-        geneCount="{outdir}/DUP.gene_count.bed"
+        geneCount="{outdir}/DUP.gene_count.bed",
     params:
         gen=GEN,
     shell:"""
