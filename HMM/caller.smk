@@ -12,6 +12,7 @@ RD = config["scr"]
 
 ASM=RD+"/annotation/hg38.fa.fai"
 REP=RD+"/annotation/repeatMask.merged.bed"
+GEN=RD+"/annotation/gencode.gene.bed"
 
 #config("hmm_caller.json")
 
@@ -68,7 +69,7 @@ rule all:
         plot=expand("{outdir}/{bm}.noclip.{ep}.pdf",bm=prefix_bam,outdir=outdir,ep=ep),
         sumcall=expand("{outdir}/CallSummary.{ep}.tsv",outdir=outdir,ep=ep),
         Vsumcall=expand("{outdir}/CallSummary.verbose.{ep}.tsv",outdir=outdir,ep=ep),
-
+        geneCount=expand("{outdir}/DUP.gene_count.bed",outdir=outdir),
 
 rule MakeCovBed:
     input:
@@ -361,3 +362,15 @@ rule callSummary:
 sort -k4,4n {input.call}|awk 'BEGIN{{OFS="\t"}} $6=$3-$2' -|groupBy -g 4 -c 4,6 -o count,mean>{output.sumcall}
 sort -k1,1 -k4,4n {input.call}|awk 'BEGIN{{OFS="\t"}} $6=$3-$2' -|groupBy -g 1,4 -c 4,6 -o count,mean> {output.Vsumcall}
     """
+
+
+rule GeneCount:
+    input:
+        call="{outdir}/DUPcalls.masked_CN.composite.tsv",
+    output:
+        geneCount="{outdir}/DUP.gene_count.bed"
+    params:
+        gen=GEN,
+    shell:"""
+        intersectBed -F 1 -wb -wa -a {input} -b {params.gen} | groupBy -g 1,2,3,6 -c 5,10,10 -o collapse,collapse,count > {output}
+        """
