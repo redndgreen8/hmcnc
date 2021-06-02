@@ -56,18 +56,24 @@ double max_over_rows(vector<vector<double> > &v , size_t col ,vector<vector<doub
 double Prpoiss(int cn,  int cov, int Hmean) {
     double result=0;
     const double epsi=1e-99;
-    if(cov > 10.497*Hmean){
+    if (Hmean==0){//no alignment in contig
+        if(cn!= 0)
+            result=epsi;
+        else
+            result=1-epsi;        
+    }
+    else if(cov == 10.497*Hmean){//max_obs filtered previously
         if(cn!= 11)
             result=epsi;
         else
             result=1-epsi;
     }
-    else if(cn!=0){
-        poisson distribution(cn*Hmean);
+    else if(cn==0){//del_states
+        poisson distribution(0.01*Hmean);
         result=pdf(distribution, cov);
     }
     else{
-        poisson distribution(0.01*Hmean);
+        poisson distribution(cn*Hmean);
         result=pdf(distribution, cov);
     }
     return result;
