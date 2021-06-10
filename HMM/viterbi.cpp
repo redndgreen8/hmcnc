@@ -201,23 +201,6 @@ if (argc != 6) {
 
     size_t mean= std::floor( std::stoi(argv[2]) /2 );
     const size_t calc_mean = std::floor( (sum/nObservations)  /2 );
-/*
-    std::ifstream file2;
-
-    file2.open(mean_file);
-    cout<<"to mean"<<endl;
-    double inputmean,mean_tmp;
-    while(file > > inputmean){
-        mean_tmp=inputmean;
-        cout<<mean_tmp<<" "<<inputmean<<endl;
-    }
-    const size_t mean=  std::floor(mean_tmp/2);
-    file2.close();
-
-*/
-
-   // size_t nObservations=observations.size();
-    //----------------------------------------------------------------------
 
     //max cov value observed or upper cov bound -> max nState---------------
     size_t max_obs = std::min( ( (size_t) std::ceil(10.497*mean)) , max);
@@ -227,8 +210,11 @@ if (argc != 6) {
     cout<<"max_cov "<<max_obs<<endl;
     cout<<"mean "<<mean<<" calc mean "<<calc_mean<<endl;
     //----------------------------------------------------------------------
-
-    mean = calc_mean;
+double meann;
+if (calc_mean==0)
+    meann=0.01;
+else
+    meann = calc_mean;
 
    // const double epsi=1e-99;
     vector<double> startP(nStates);
@@ -239,14 +225,14 @@ if (argc != 6) {
 
         // trans prob
 
-        poisson distribution1(3*mean);
-        double result3=pdf(distribution1, 3*mean);
+        poisson distribution1(3*meann);
+        double result3=pdf(distribution1, 3*meann);
 
-        poisson distribution2(2*mean);
-        double result2=pdf(distribution2, 3*mean);
+        poisson distribution2(2*meann);
+        double result2=pdf(distribution2, 3*meann);
 
         double epsi23 = result2/result3;
-
+/*
         poisson distribution3(mean);
         double result1=pdf(distribution3, mean);
 
@@ -256,7 +242,7 @@ if (argc != 6) {
         double epsi21 = result4/result1;
 
         cout<<"epsi23 "<<epsi23<<" epsi21 "<<epsi21<<endl;
-
+*/
 
 const double epsi = std::pow(0.1,std::stoi(argv[5]));
 cout<<"epsi: "<<epsi<<endl;
