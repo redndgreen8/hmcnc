@@ -35,7 +35,7 @@ rule stb:
 
 rule vit:
 	input:
-		vitt="viterbi.noclip.cpp",
+		vitt="viterbi.cpp",
 	output:
 		samtobed="viterbi",
 	params:
