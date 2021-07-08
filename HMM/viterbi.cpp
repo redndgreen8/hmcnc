@@ -163,8 +163,8 @@ void viterbi( vector<double> &startP,
 
 int main(int argc, const char * argv[]) {
 
-if (argc != 6) {
-    std::cerr << "usage: " << argv[0] << " <coverage observation> <Diploid mean coverage> <output prefix> <scaler> <epsi>" << endl;
+if (argc != 7) {
+    std::cerr << "usage: " << argv[0] << " <coverage observation> <mean coverage> <output prefix> <scaler> <epsi> <Diploid(0)/Haploid(1)>" << endl;
     return EXIT_FAILURE;
 }
 
@@ -173,13 +173,15 @@ if (argc != 6) {
 
 
     //observations--------------------------------------------------------
+
+
     vector<size_t> observations;
     const string filename2(argv[1]);
     std::ifstream file;
     size_t inputString;
     file.open(filename2);
     int i=0;
-    size_t max=0;
+    size_t maxx=0;
     size_t sum=0;
 
     //int maxi=0;
@@ -188,9 +190,9 @@ if (argc != 6) {
         observations.push_back(inputString);
         sum=sum+inputString;
         //observations[i]=inputString;
-        if(inputString>=max)
+        if(inputString>maxx)
         {
-            max=inputString;
+            maxx=inputString;
             //      maxi=i;
         }
         i++;
@@ -199,17 +201,32 @@ if (argc != 6) {
 
     size_t nObservations=observations.size();
 
-    size_t mean= std::floor( std::stoi(argv[2]) /2 );
-    const size_t calc_mean = std::floor( (sum/nObservations)  /2 );
+    size_t div=1;
+
+    if (argv[6]==0){
+        div=2;
+    }
+
+    size_t mean= std::floor( std::stoi(argv[2]) /div );
+    const size_t calc_mean = std::floor( (sum/nObservations)  /div );
 
     //max cov value observed or upper cov bound -> max nState---------------
-    size_t max_obs = std::min( ( (size_t) std::ceil(10.497*mean)) , max);
+    size_t max_obs = std::min( ( (size_t) std::ceil(10.497*mean)) , maxx);
     size_t nStates= std::min(  ((int) std::ceil(max_obs/mean)) + 1  ,12   );//+1 zeroth state
 
     cout<<"nstates "<<nStates<<endl;
     cout<<"max_cov "<<max_obs<<endl;
     cout<<"mean "<<mean<<" calc mean "<<calc_mean<<endl;
     //----------------------------------------------------------------------
+
+
+if (mean == 0) {
+    std::cerr << "mean is zero, Exiting" << endl;
+    return EXIT_FAILURE;
+}
+
+
+/*
 double meann;
 if (calc_mean==0)
     meann=0.01;
@@ -217,6 +234,8 @@ else
     meann = calc_mean;
 
    // const double epsi=1e-99;
+
+*/
     vector<double> startP(nStates);
 
     for(size_t i=0;i<(nStates);i++){
@@ -225,11 +244,11 @@ else
 
         // trans prob
 
-        poisson distribution1(3*meann);
-        double result3=pdf(distribution1, 3*meann);
+        poisson distribution1(3*mean);
+        double result3=pdf(distribution1, 3*mean);
 
-        poisson distribution2(2*meann);
-        double result2=pdf(distribution2, 3*meann);
+        poisson distribution2(2*mean);
+        double result2=pdf(distribution2, 3*mean);
 
         double epsi23 = result2/result3;
 /*
