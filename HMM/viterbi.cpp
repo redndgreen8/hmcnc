@@ -201,10 +201,11 @@ if (argc != 7) {
 
     size_t nObservations=observations.size();
 
-    size_t div=1;
 
-    if (argv[6]==0){
-        div=2;
+    size_t div=2;
+
+    if (std::stoi(argv[6])==1){
+        div=1;
     }
 
     size_t mean= std::floor( std::stoi(argv[2]) /div );
