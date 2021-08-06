@@ -1,5 +1,3 @@
-
-
 #include <iostream>
 #include <limits>
 #include <string>
@@ -9,74 +7,180 @@
 #include <cassert>
 #include <cmath>
 #include <boost/math/distributions/poisson.hpp>
+#include <boost/math/distributions/negative_binomial.hpp>
+
 using boost::math::poisson;
 using boost::math::pdf;
+using boost::math::negative_binomial_distribution;
 using std::vector;
 using std::cout;
 using std::endl;
 using std::string;
 using std::log;
 
+int MAX_CN=10;
+float MISMAP_RATE=0.01;
+using namespace std;
+double lepsi=-10000;
+
+
 static void printModel(vector<vector<double> > &transP,
                        int nStates)
 {
 
-    cout<< "\nTRANS: \n";
-    for (int r=0;r<nStates;r++)
+  cerr << "\nTRANS: \n";
+  for (int r=0;r<nStates;r++)
     {
-        cout<<r<<": ";
-        for (int c=0;c<nStates;c++)
+      cerr << r <<": ";
+      for (int c=0;c<nStates;c++)
         {
-            cout<< transP[r][c] << " ";
+	  cerr << transP[r][c] << " ";
         }
-        cout<< "\n";
-    }cout<< "\n";
+      cerr << "\n";
+    }
+  cerr<< "\n";
 }
+
+static void printEmissions(vector<vector<double> > &emisP)
+
+{
+  cerr << "Emissions matrix: \n";
+  for (size_t r=0;r<emisP.size(); r++) 
+    {
+      for (size_t c=0;c<emisP[r].size(); c++ )
+	{
+	  cerr << std::setw(4) << emisP[r][c];
+	  if (c+1 < emisP[r].size()) 
+	    {
+	      cerr << " ";
+	    }	  
+	}
+      cerr << endl;
+    }
+}
+
 
 double max_over_row(vector<vector<double> > &v , size_t col ,size_t nStates ){
 
-    double maxi=-1 * (std::numeric_limits<double>::max()) ;
-    for(size_t i=0;i< nStates;i++){
-            maxi=std::max(v[i][col], maxi);
-    }
-    return maxi;
+  double maxi=-1 * (std::numeric_limits<double>::max()) ;
+  for(size_t i=0;i< nStates;i++){
+    maxi=std::max(v[i][col], maxi);
+  }
+  return maxi;
 }
 
 
 double max_over_rows(vector<vector<double> > &v , size_t col ,vector<vector<double> > &v2 , size_t nextState,size_t nStates ){
-    double maxi2=-1 * (std::numeric_limits<double>::max()) ;
+  double maxi2=-1 * (std::numeric_limits<double>::max()) ;
 
-    for(size_t i=0;i< nStates;i++){
-            maxi2=std::max( v[i][col] + v2[i][nextState] , maxi2);
+  for(size_t i=0;i< nStates;i++){
+    maxi2=std::max( v[i][col] + v2[i][nextState] , maxi2);
 
-    }
-    return maxi2;
+  }
+  return maxi2;
 }
 
-double Prpoiss(int cn,  int cov, int Hmean) {
-    double result=0;
-    const double epsi=1e-99;
-    if (Hmean==0){//no alignment in contig
-        if(cn!= 0)
-            result=epsi;
-        else
-            result=1-epsi;        
+double LgNegBinom(int cn, int cov, float Hmean, float Hvar) {
+  double result=0;
+  float r, p;
+
+  if (Hmean == 0 or Hvar == 0) {
+    return 0;
+  }
+  //
+  // Since actual variance is unknown at high copy number states, assume linear increase.
+  //
+      
+  if (Hmean==0) {//no alignment in contig
+    if (cn!= 0)
+      result=lepsi;
+    else
+      result=0;    
+  }
+  else if (cov >= MAX_CN*Hmean) {//max_obs filtered previously
+    if(cn!= MAX_CN)
+      result=lepsi;
+    else
+      result=0;
+  }
+  else if(cn==0){//del_states
+    //
+    // Use poisson for 0-state assuming it's a random mismap process.
+    poisson distribution(MISMAP_RATE*Hmean);
+    double prob=pdf(distribution, cov);
+    if (prob == 0) 
+      {
+	result=lepsi;
+      }
+    else 
+      {
+	result=log(prob);
+      }
+  }
+  else{
+    Hmean*=cn;
+    Hvar*=cn;
+    p=Hmean/Hvar;
+    r=Hmean*(Hmean/Hvar)/(1-Hmean/Hvar);
+    
+    negative_binomial_distribution<double> distribution(r,p);    
+    double prob=pdf(distribution, cov);
+    if (prob == 0) 
+      {
+	result=lepsi;
+      }
+    else
+      {
+	result=log(prob);
+
+      }
+  }
+  return result;  
+}
+
+double LgPrpoiss(int cn,  int cov, int Hmean) {
+  double result=0;
+
+  // Boundary case
+  if (Hmean==0){//no alignment in contig
+    if(cn!= 0)
+      // Cannot emit 0 reads from non-zero states.
+      result=lepsi;
+    else
+      // Can only emit 0
+      result=0;
+  }
+  else if (cov >= MAX_CN*Hmean){//max_obs filtered previously
+    //
+    // Have state that catches ultra-high probability states.
+    if(cn != MAX_CN)
+      result=lepsi;
+    else
+      result=0;
+  }
+  else if(cn==0){//del_states
+    poisson distribution(MISMAP_RATE*Hmean);
+    double prob=pdf(distribution, cov);
+    if (prob == 0) {
+      result = lepsi;      
     }
-    else if(cov == 10.497*Hmean){//max_obs filtered previously
-        if(cn!= 11)
-            result=epsi;
-        else
-            result=1-epsi;
+    else {
+      result = log(prob);
     }
-    else if(cn==0){//del_states
-        poisson distribution(0.01*Hmean);
-        result=pdf(distribution, cov);
-    }
-    else{
-        poisson distribution(cn*Hmean);
-        result=pdf(distribution, cov);
-    }
-    return result;
+  }
+  else {
+    poisson distribution(cn*Hmean);
+    double prob=pdf(distribution, cov);
+    if (prob == 0)
+      {
+	result=lepsi;
+      }
+    else 
+      {
+	result=log(prob);	
+      }
+  }
+  return result;
 }
 
 
@@ -85,72 +189,70 @@ double Prpoiss(int cn,  int cov, int Hmean) {
 static void correctModel(vector<vector<double> > &transP,
                          int nStates)
 {
-    double sum;
-    for (int i=0;i<nStates;i++)
+  double sum;
+  for (int i=0;i<nStates;i++)
     {
-        sum = 0;
-        for (int j=0;j<nStates;j++)
-            sum+= std::exp(transP[i][j]);
-        for (int j=0;j<nStates;j++)
-            transP[i][j]= log(std::exp(transP[i][j])/sum);
+      sum = 0;
+      for (int j=0;j<nStates;j++)
+	sum+= std::exp(transP[i][j]);
+      for (int j=0;j<nStates;j++)
+	transP[i][j]= log(std::exp(transP[i][j])/sum);
     }
 }//correctModel
 
 
 void viterbi( vector<double> &startP,
-    vector<vector<double> > &transP,
-   vector<vector<double> > &emisP,
-    vector<size_t> &observations,
-    size_t nStates ,
-    size_t mean,
-    vector<size_t> &  viterbiPath ,size_t nObservations, size_t max_obs){
+	      vector<vector<double> > &transP,
+	      vector<vector<double> > &emisP,
+	      vector<size_t> &observations,
+	      size_t nStates ,
+	      size_t mean,
+	      vector<size_t> &  viterbiPath ,size_t nObservations, size_t max_obs){
 
-    //size_t  nObservations  = observations.size();
-    vector<vector<double> > v(nStates, vector<double>(nObservations)  );
-    // Init
-    size_t obs = std::min(max_obs , observations[0]);
-    for(size_t i=0;i<nStates;i++)
+  //size_t  nObservations  = observations.size();
+  vector<vector<double> > v(nStates, vector<double>(nObservations)  );
+  // Init
+  size_t obs = std::min(max_obs , observations[0]);
+  for(size_t i=0;i<nStates;i++)
     {
-
-        v[i][0] =  startP[i] + emisP[i][obs] ;
+      v[i][0] =  startP[i] + emisP[i][obs] ;
     }
-// Iteration
+  // Iteration
     
-    for(size_t k=1 ; k<nObservations ; k++)
+  for(size_t k=1 ; k<nObservations ; k++)
     {
-        size_t obs = std::min(max_obs , observations[k]);
-        for(size_t i=0;i<nStates;i++)
+      size_t obs = std::min(max_obs, observations[k]);
+      for(size_t i=0;i<nStates;i++)
         {
-            double maxi = -1 * (std::numeric_limits<double>::max());
-            for(size_t j=0;j<nStates;j++)
+	  double maxi = -1 * (std::numeric_limits<double>::max());
+	  for(size_t j=0;j<nStates;j++)
             {
-                double temp = v[j][k-1] + transP[j][i];
-                maxi = std::max(maxi, temp);
-
+	      double temp = v[j][k-1] + transP[j][i];
+	      maxi = std::max(maxi, temp);
             }
-            v[i][k] = emisP[i][obs] + maxi;
+	  v[i][k] = emisP[i][obs] + maxi;
         }
     }
-// Traceback
-    for(size_t i=0;i<nStates;i++)
+  // Traceback
+  for(size_t i=0;i<nStates;i++)
     {
-        if( max_over_row(v,nObservations-1,nStates) == v[i][nObservations-1] )
+      if( max_over_row(v,nObservations-1,nStates) == v[i][nObservations-1] )
         {
-            viterbiPath[nObservations-1] = i;
-            break;
+	  viterbiPath[nObservations-1] = i;
+	  break;
         }
     }
-    size_t k=nObservations-2;
-    for( size_t f=0;f<nObservations-1;   f++ )
+  size_t k=nObservations-2;
+  for( size_t f=0;f<nObservations-1;   f++ )
     {
-        for(size_t i=0;i<nStates;i++)
+      for(size_t i=0;i<nStates;i++)
         {
-            //comput max value in column
-            double max_rows = max_over_rows(v,k-f,transP, viterbiPath[(k-f)+1], nStates );
-            if( max_rows    == v[i][k-f]+ transP[i][viterbiPath[(k-f)+1] ]   )
+	  //comput max value in column
+	  double max_rows = max_over_rows(v,k-f,transP, viterbiPath[(k-f)+1], nStates );
+	  if( max_rows    == v[i][k-f]+ transP[i][viterbiPath[(k-f)+1] ]   )
             {
-                viterbiPath[k-f] = i;
-                break;
+	      viterbiPath[k-f] = i;
+	      break;
             }
         }
     }
@@ -163,181 +265,189 @@ void viterbi( vector<double> &startP,
 
 int main(int argc, const char * argv[]) {
 
-if (argc != 7) {
-    std::cerr << "usage: " << argv[0] << " <coverage observation> <mean coverage> <output prefix> <scaler> <epsi> <Diploid(0)/Haploid(1)>" << endl;
+  if (argc < 7) {
+    std::cerr << "usage: " << argv[0] << " <coverage observation> <mean coverage> <output prefix> <scalar> <epsi> <Diploid(0)/Haploid(1)> " << endl
+	      << " --model (string) poisson|negbinom . Use either Poisson or negative binomial for emission probability." << endl
+	      << " --var   (float)  var                Variance of input data. Required for negative binomial." << endl;    
     return EXIT_FAILURE;
-}
+  }
 
-    const string prefix_file(argv[3]);
-    //const string mean_file(argv[2]);
-
-
-    //observations--------------------------------------------------------
+  const string prefix_file(argv[3]);
+  //const string mean_file(argv[2]);
 
 
-    vector<size_t> observations;
-    const string filename2(argv[1]);
-    std::ifstream file;
-    size_t inputString;
-    file.open(filename2);
-    int i=0;
-    size_t maxx=0;
-    size_t sum=0;
+  //observations--------------------------------------------------------
 
-    //int maxi=0;
-    while(file >> inputString)
+
+  vector<size_t> observations;
+  const string filename2(argv[1]);
+  std::ifstream file;
+  size_t coverage;
+  file.open(filename2.c_str());
+  if (file.good() == false) {
+    cerr << "ERROR. Could not open " << filename2 << endl;
+    exit(1);
+  }
+  int i=0;
+  size_t maxx=0;
+  size_t sum=0;
+  int div=1;
+  float var=-1;
+  
+  if (strcmp(argv[6], "0") == 0) {
+    div=2;
+  }
+  int argi=7;
+  typedef enum { POIS, NEG_BINOM  } MODEL_TYPE;
+  MODEL_TYPE model=POIS;
+    
+  while (argi < argc ) 
     {
-        observations.push_back(inputString);
-        sum=sum+inputString;
-        //observations[i]=inputString;
-        if(inputString>maxx)
+      if (strcmp(argv[argi], "--model")==0) 
+	{
+	  argi++;
+	  if (strcmp(argv[argi], "negbinom") == 0) 
+	    {
+	      model=NEG_BINOM;
+	    }
+	}
+      if (strcmp(argv[argi], "--var")==0) 
+	{
+	  argi++;
+	  if (argi < argc) 
+	    {
+	      var=atof(argv[argi]);	      
+	    }
+	}
+      ++argi;      
+    }
+
+  if (model == NEG_BINOM and var < 0) 
+    {
+      std::cerr << "ERROR. Using negative binomial model without specifying variance." << endl;
+      exit(0);      
+    }
+        
+  //int maxi=0;
+  while(file >> coverage)
+    {
+      observations.push_back(coverage);
+      sum=sum+coverage;
+      if(coverage>maxx)
         {
-            maxx=inputString;
-            //      maxi=i;
+	  maxx=coverage;
         }
-        i++;
+      i++;
     }
-    file.close();
-
-    size_t nObservations=observations.size();
-
-    size_t div=1;
-
-    if (argv[6]==0){
-        div=2;
-    }
-
-    size_t mean= std::floor( std::stoi(argv[2]) /div );
-    const size_t calc_mean = std::floor( (sum/nObservations)  /div );
-
-    //max cov value observed or upper cov bound -> max nState---------------
-    size_t max_obs = std::min( ( (size_t) std::ceil(10.497*mean)) , maxx);
-    size_t nStates= std::min(  ((int) std::ceil(max_obs/mean)) + 1  ,12   );//+1 zeroth state
-
-    cout<<"nstates "<<nStates<<endl;
-    cout<<"max_cov "<<max_obs<<endl;
-    cout<<"mean "<<mean<<" calc mean "<<calc_mean<<endl;
-    //----------------------------------------------------------------------
+  file.close();
+  
+  size_t nObservations=observations.size();
 
 
-if (mean == 0) {
+  size_t mean= std::floor( std::stoi(argv[2]) /div );
+  const size_t calc_mean = std::floor( (sum/nObservations)  /div );
+
+  //max cov value observed or upper cov bound -> max nState---------------
+  size_t max_obs = std::min( ( (size_t) std::ceil(MAX_CN*mean)), maxx);
+  int maxObsCN=std::ceil(max_obs/mean);
+  size_t nStates= std::min( maxObsCN , MAX_CN  ) + 1; //+1 zeroth state
+  MAX_CN=nStates+1;
+  std::cerr << "nstates " <<nStates << endl;
+  std::cerr << "max_cov "<< max_obs << endl;
+  std::cerr << "mean " << mean << " calc mean " << calc_mean << endl;
+  //----------------------------------------------------------------------
+
+
+  if (mean == 0) {
     std::cerr << "mean is zero, Exiting" << endl;
     return EXIT_FAILURE;
-}
+  }
 
+  vector<double> startP(nStates);
 
-/*
-double meann;
-if (calc_mean==0)
-    meann=0.01;
-else
-    meann = calc_mean;
+  for(size_t i=0;i<(nStates);i++){
+    startP[i]=log(1./(nStates));
+  }
 
-   // const double epsi=1e-99;
+  // trans prob
 
-*/
-    vector<double> startP(nStates);
+  poisson distribution1(3*mean);
+  double result3=pdf(distribution1, 3*mean);
 
-    for(size_t i=0;i<(nStates);i++){
-            startP[i]=log(1./(nStates));
-    }
+  poisson distribution2(2*mean);
+  double result2=pdf(distribution2, 3*mean);
 
-        // trans prob
+  double epsi23 = result2/result3;
+  const double lepsi = stod(argv[5]);
+  //*300
+  const double scale = std::stod(argv[4]);
 
-        poisson distribution1(3*mean);
-        double result3=pdf(distribution1, 3*mean);
+  //no epsi
+  double beta =  lepsi + ( scale * log(epsi23))  ;
+  //mean no. of bins for cn=3 call
 
-        poisson distribution2(2*mean);
-        double result2=pdf(distribution2, 3*mean);
-
-        double epsi23 = result2/result3;
-/*
-        poisson distribution3(mean);
-        double result1=pdf(distribution3, mean);
-
-        poisson distribution4(2*mean);
-        double result4=pdf(distribution4, mean);
-
-        double epsi21 = result4/result1;
-
-        cout<<"epsi23 "<<epsi23<<" epsi21 "<<epsi21<<endl;
-*/
-
-const double epsi = std::pow(0.1,std::stoi(argv[5]));
-cout<<"epsi: "<<epsi<<endl;
-    //*300
-    const double scale = std::stod(argv[4]);
-    const double lepsi=log(epsi);
-
-//no epsi
-    double beta =  lepsi + ( scale * log(epsi23))  ;
-                                    //mean no. of bins for cn=3 call
-
-
-
-
-    vector<vector<double> > transP(nStates, vector<double>(nStates));
-    for (size_t i=0;i<nStates;i++)
+  vector<vector<double> > transP(nStates, vector<double>(nStates));
+  for (size_t i=0;i<nStates;i++)
     {
-        for (size_t j=0;j<nStates;j++)
+      for (size_t j=0;j<nStates;j++)
         {
-            if(i==j)
+	  if(i==j)
             {
-                transP[i][j]= log(1 - std::exp(beta) );
+	      transP[i][j]= log(1 - std::exp(beta) );
             }
             
             
-            else
+	  else
             {
-                if ( j==3)
+	      if ( j==3)
                 {
-                    transP[i][j]= beta - log(nStates-1) ;
+		  transP[i][j]= beta - log(nStates-1) ;
 
                 }
-                else
+	      else
                 {
-                    transP[i][j]= beta - log(nStates-1);
+		  transP[i][j]= beta - log(nStates-1);
                 
                 }
             }
         }
     }
 
-    printModel(transP,nStates);
   //  correctModel(transP,nStates);
-   // printModel(transP,nStates);
+  // printModel(transP,nStates);
 
 
-    vector<vector<double> > emisP(nStates, vector<double>(max_obs+1));
-    for (size_t i=0;i<nStates;i++){
-        for (size_t j=0;j<=max_obs;j++){
+  vector<vector<double> > emisP(nStates, vector<double>(max_obs+1));
+
+  for (size_t i=0;i<nStates;i++){
+    for (size_t j=0;j<=max_obs;j++){
+      if (model == POIS) {	
+	emisP[i][j]=LgPrpoiss( (int) i , j , (int) mean );
+      }
+      else 
+	{
+	  emisP[i][j]=LgNegBinom((int)i, (int) j, mean, var);
+	}      
+    }
+  }
   
-                emisP[i][j]=log(Prpoiss( (int) i , j , (int) mean ));
+    
+  printModel(transP,nStates);
+  printEmissions(emisP); 
 
-        }
-    }
+  vector<size_t> viterbiPath(nObservations);
 
+  viterbi(startP, transP,emisP, observations, nStates,mean,viterbiPath,nObservations,max_obs);
+  string v("viterout.txt");
+  string filen = prefix_file + "." +v;
 
+  std::ofstream output;
+  output.open(filen.c_str());
 
-    vector<size_t> viterbiPath(nObservations);
+  for (size_t i=0;i< nObservations; i++){
+    output<<viterbiPath[i]<<endl;
+  }
+  output.close();
 
-
-    viterbi(startP, transP,emisP, observations, nStates,mean,viterbiPath,nObservations,max_obs);
-    string v("viterout.txt");
-    string filen = prefix_file + "." +v;
-
-    std::ofstream output;
-    output.open(filen.c_str());
-
-    for (size_t i=0;i< nObservations; i++){
-        output<<viterbiPath[i]<<endl;
-    }
-    output.close();
-
-
-
-
-
-
-return 0;
+  return 0;
 }//main
