@@ -339,6 +339,16 @@ int main(int argc, const char * argv[]) {
         }
       i++;
     }
+    file.close();
+
+    size_t nObservations=observations.size();
+
+
+    size_t div=2;
+
+    if (std::stoi(argv[6])==1){
+        div=1;
+    }
   file.close();
   
   size_t nObservations=observations.size();

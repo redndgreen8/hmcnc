@@ -42,7 +42,7 @@ rule vit:
 		proj_env={boost},
 
 	shell:"""
-g++ -W -I {params.proj_env} {input.vitt} -o {output.samtobed}
+g++ -O2 -W -I {params.proj_env} {input.vitt} -o {output.samtobed}
 """
 
 
