@@ -485,20 +485,22 @@ void ParseChrom(ThreadInfo *threadInfo) {
       }
       (*threadInfo->covBins)[curSeq][bin] =totCov/BIN_LENGTH;
     }
+    
     //
     // Detect SNVS
     //        
-
-  if ((*threadInfo->covBins)[curSeq].size() == 0) { return ;}
-  
-  //
-  double chromMean;
-  long chromTot=0;
-  if ((*threadInfo->covBins)[curSeq].size() == 0) {
-    continue;
-  }    
-  viterbi( *threadInfo->startP, *threadInfo->transP, *threadInfo->emisP, (*threadInfo->covBins)[curSeq], threadInfo->mean, (*threadInfo->copyNumber)[curSeq], threadInfo->maxCov);
+    
+    if ((*threadInfo->covBins)[curSeq].size() == 0) { return ;}
+    
+    //
+    double chromMean;
+    long chromTot=0;
+    if ((*threadInfo->covBins)[curSeq].size() == 0) {
+      continue;
+    }    
+    viterbi( *threadInfo->startP, *threadInfo->transP, *threadInfo->emisP, (*threadInfo->covBins)[curSeq], threadInfo->mean, (*threadInfo->copyNumber)[curSeq], threadInfo->maxCov);
   }
+  pthread_exit(NULL);    
 }
     
 
