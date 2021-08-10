@@ -555,6 +555,7 @@ int EstimateCoverage(string &bamFileName, vector<string> &chroms, vector<int> &l
     for (int i=0; i < lengths.size(); i++) {
       if (lengths[i] > maxLen) {
 	useChrom = chroms[i];
+	maxLen=lengths[i];
       }
     }
   }
