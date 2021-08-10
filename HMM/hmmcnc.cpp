@@ -247,18 +247,23 @@ void viterbi( vector<double> &startP,
 	      vector<vector<double> > &emisP,
 	      vector<int> &observations,
 	      size_t mean,
-	      vector<int> &  viterbiPath, int maxAllowedCov){
+	      vector<int> & viterbiPath, int maxAllowedCov){
 
   //size_t  nObservations  = observations.size();
   size_t nObservations=observations.size();
   int nStates=transP.size();
-  vector<vector<double> > v(nStates, vector<double>(observations.size())  );
+  vector<vector<double> > v(nStates, vector<double>(observations.size()) );
+  //  vector<vector<double> > f(nStates, vector<double>(observations.size()) );
+  //  vector<vector<double> > b(nStates, vector<double>(observations.size()) );
   vector<vector<double> > opt(nStates, vector<double>(observations.size())  );  
   // Init
   int obs = std::min(maxAllowedCov , observations[0]);
+  int last=observations.size();
   for(size_t i=0;i<nStates;i++)
     {
-      v[i][0] =  startP[i] + emisP[i][obs] ;
+      v[i][0] = startP[i] + emisP[i][obs] ;
+      //      f[i][0] = startP[i] + emisP[i][obs] ;
+      //      b[last-i-1][0] = startP[i] + emisP[i][obs] ;
     }
   // Iteration
     
@@ -278,9 +283,31 @@ void viterbi( vector<double> &startP,
 	      }
             }
 	  v[i][k] = emisP[i][obs] + maxProb;
-	  opt[i][k] = maxState;
+	  opt[i][k] = maxState;	  
         }
     }
+
+  for(int k=nObservations -1 ; k>0 ; k--)
+    {
+      size_t obs = std::min(maxAllowedCov, observations[k-1]);
+      for(size_t i=0;i<nStates;i++)
+        {
+	  double maxProb = v[0][k] + transP[0][i];
+	  int maxState=0;
+	  for(size_t j=1;j<nStates;j++)
+            {
+	      double rowProb = v[j][k] + transP[j][i];
+	      if (rowProb > maxProb) {
+		maxState=j;
+		maxProb=rowProb;
+	      }
+            }
+	  v[i][k-1] = emisP[i][obs] + maxProb;
+	  opt[i][k-1] = maxState;	  
+        }
+    }
+  
+  
   /*
   for (size_t k=1; k <nObservations; k++) {
     cout << k << "\t" << observations[k] << "\t";
@@ -490,15 +517,12 @@ void ParseChrom(ThreadInfo *threadInfo) {
     // Detect SNVS
     //        
     
-    if ((*threadInfo->covBins)[curSeq].size() == 0) { return ;}
-    
-    //
-    double chromMean;
-    long chromTot=0;
-    if ((*threadInfo->covBins)[curSeq].size() == 0) {
-      continue;
-    }    
-    viterbi( *threadInfo->startP, *threadInfo->transP, *threadInfo->emisP, (*threadInfo->covBins)[curSeq], threadInfo->mean, (*threadInfo->copyNumber)[curSeq], threadInfo->maxCov);
+    if ((*threadInfo->covBins)[curSeq].size() > 0) { 
+      //
+      double chromMean;
+      long chromTot=0;
+      viterbi( *threadInfo->startP, *threadInfo->transP, *threadInfo->emisP, (*threadInfo->covBins)[curSeq], threadInfo->mean, (*threadInfo->copyNumber)[curSeq], threadInfo->maxCov);
+    }
   }
   pthread_exit(NULL);    
 }
