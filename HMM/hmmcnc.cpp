@@ -40,6 +40,21 @@ public:
   int pos;
 };
 
+double SumOfLogP(vector<double> &vals) {
+  if (vals.size() == 0) {
+    // Return 0 for error.
+    return 0;
+  }
+  double maxVal = vals[0];
+  for (size_t i=1; i < vals.size(); i++) { maxVal=max(maxVal,vals[i]); }
+  double expSum=0;
+  for (size_t i=0; i < vals.size(); i++) {
+    expSum+= exp(vals[i]-maxVal);
+  }
+  return maxVal+log(expSum);
+}
+
+
 using namespace std;
 class ThreadInfo {
 public:
@@ -706,11 +721,12 @@ int main(int argc, const char* argv[]) {
   if (argc < 3) {
     cout << "usage: hmmcnc input.bam reference.fa" << endl	       
 	 << "    The per nucleotide frequency will be calculated " << endl
-	 << " -t value (int) Number of threads (4) " << endl
-	 << " -c contig  Use this contig to estimate coverage. By default, longest contig." << endl
-	 << " -C contig  Only run hmm on this chrom." << endl      
-	 << " -e value (float) Value of log-epsilon (-500)." << endl      
-	 << " -s value (float) Scalar for transition probabilities (pre Baum-Welch) (10)" << endl
+         << " -o file            Output to this file (stdout)." << endl
+	 << " -t value (int)     Number of threads (4) " << endl
+	 << " -c contig          Use this contig to estimate coverage. By default, longest contig." << endl
+	 << " -C contig          Only run hmm on this chrom." << endl      
+	 << " -e value (float)   Value of log-epsilon (-500)." << endl      
+	 << " -s value (float)   Scalar for transition probabilities (pre Baum-Welch) (10)" << endl
 	 << " -m value [pois|nb] Coverage model to use, Poisson (pois), or negative binomial (nb). Default nb." << endl
 	 << " -x value Max state to allow (10)" << endl;
     exit(1);
@@ -727,6 +743,7 @@ int main(int argc, const char* argv[]) {
   MODEL_TYPE model=NEG_BINOM;
   string useChrom="";
   string hmmChrom="";
+  string outFileName="";
   if (argc > 3) {
     int argi=3;
     while (argi < argc) {
@@ -748,6 +765,10 @@ int main(int argc, const char* argv[]) {
 	  model=POIS;
 	}
       }
+      else if (strcmp(argv[argi], "-o") == 0) {
+	++argi;
+	outFileName = argv[argi];
+      }      
       else if (strcmp(argv[argi], "-c") == 0) {
 	++argi;
 	useChrom = argv[argi];
@@ -937,13 +958,22 @@ int main(int argc, const char* argv[]) {
     pthread_create(&threads[procIndex], &threadAttr[procIndex], (void* (*)(void*)) ParseChrom, &threadInfo[procIndex]);
   }
 
-  
+  ofstream outFile;
+  ostream *outPtr;
+  if (outFileName == "" or outFileName == "-" or outFileName == "stdin" or outFileName == "/dev/stdin") {
+    outPtr = &cout;
+  }
+  else {
+    outFile.open(outFileName.c_str());
+    outPtr = &outFile;
+  }
+      
   for (int procIndex = 0; procIndex < nproc; procIndex++) {
     pthread_join(threads[procIndex], NULL);
   }
   for (int c=0; c < contigNames.size(); c++) {
     for (int b=0; b < copyNumber[c].size(); b++) {
-      cout << contigNames[c] << b*BIN_LENGTH << "\t" << min((b+1)*BIN_LENGTH, contigLengths[c]) << "\t" << covBins[c][b] << "\t" << copyNumber[c][b] << endl;
+      (*outPtr) << contigNames[c] << "\t" << b*BIN_LENGTH << "\t" << min((b+1)*BIN_LENGTH, contigLengths[c]) << "\t" << covBins[c][b] << "\t" << copyNumber[c][b] << endl;
     }
   }
   /*
