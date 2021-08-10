@@ -211,6 +211,7 @@ void viterbi( vector<double> &startP,
 
   //size_t  nObservations  = observations.size();
   vector<vector<double> > v(nStates, vector<double>(nObservations)  );
+  vector<vector<double> > opt(nStates, vector<double>(nObservations)  );  
   // Init
   size_t obs = std::min(max_obs , observations[0]);
   for(size_t i=0;i<nStates;i++)
@@ -224,15 +225,38 @@ void viterbi( vector<double> &startP,
       size_t obs = std::min(max_obs, observations[k]);
       for(size_t i=0;i<nStates;i++)
         {
-	  double maxi = -1 * (std::numeric_limits<double>::max());
+	  double maxProb = v[0][k-1] + transP[0][i];
+	  int maxState=0;
 	  for(size_t j=0;j<nStates;j++)
             {
-	      double temp = v[j][k-1] + transP[j][i];
-	      maxi = std::max(maxi, temp);
+	      double rowProb = v[j][k-1] + transP[j][i];
+	      if (rowProb > maxProb) {
+		maxState=j;
+		maxProb=rowProb;
+	      }
             }
-	  v[i][k] = emisP[i][obs] + maxi;
+	  v[i][k] = emisP[i][obs] + maxProb;
+	  opt[i][k] = maxState;
         }
     }
+  /*
+  for (size_t k=1; k <nObservations; k++) {
+    cout << k << "\t" << observations[k] << "\t";
+    for (size_t i=0; i < nStates; i++) {
+      cout << std::setw(8) << v[i][k] << " ";
+    }
+    cout << endl;
+  }
+
+  for (size_t k=1; k <nObservations; k++) {
+    cout << k << "\t" << observations[k] << "\t";
+    for (size_t i=0; i < n States; i++) {
+      cout << std::setw(4 ) << opt[i][k] << " ";
+    }
+    cout << endl;
+  }
+  */
+      
   // Traceback
   for(size_t i=0;i<nStates;i++)
     {
@@ -242,21 +266,26 @@ void viterbi( vector<double> &startP,
 	  break;
         }
     }
-  size_t k=nObservations-2;
-  for( size_t f=0;f<nObservations-1;   f++ )
-    {
-      for(size_t i=0;i<nStates;i++)
-        {
-	  //comput max value in column
-	  double max_rows = max_over_rows(v,k-f,transP, viterbiPath[(k-f)+1], nStates );
-	  if( max_rows    == v[i][k-f]+ transP[i][viterbiPath[(k-f)+1] ]   )
-            {
-	      viterbiPath[k-f] = i;
-	      break;
-            }
-        }
+  size_t lastObservation=nObservations-2;
+  //
+  // Find highest-scoring final entry.
+  //
+  size_t rowIndex=nObservations-2;
+  double maxScore=v[0][rowIndex];
+  int    maxState=0;
+  for (size_t i=1;i < nStates; i++) {
+    if (maxScore < v[i][rowIndex]) {
+      maxState=i;
+      maxScore=v[i][rowIndex];
     }
-
+  }
+  viterbiPath[lastObservation] = maxState;
+  
+  
+  for( size_t f=lastObservation; f > 0; f--) {
+      viterbiPath[f] = maxState;
+      maxState=opt[maxState][f];
+    }
 
 }//viterbi
 
@@ -267,8 +296,8 @@ int main(int argc, const char * argv[]) {
 
   if (argc < 7) {
     std::cerr << "usage: " << argv[0] << " <coverage observation> <mean coverage> <output prefix> <scalar> <epsi> <Diploid(0)/Haploid(1)> " << endl
-	      << " --model (string) poisson|negbinom . Use either Poisson or negative binomial for emission probability." << endl
-	      << " --var   (float)  var                Variance of input data. Required for negative binomial." << endl;    
+      //	      << " --model (string) poisson|negbinom . Use either Poisson or negative binomial for emission probability." << endl
+	      << " --nbvar   (float)  var                Use a negative binomial emission model with the given data variance." << endl;    
     return EXIT_FAILURE;
   }
 
@@ -303,19 +332,12 @@ int main(int argc, const char * argv[]) {
     
   while (argi < argc ) 
     {
-      if (strcmp(argv[argi], "--model")==0) 
-	{
-	  argi++;
-	  if (strcmp(argv[argi], "negbinom") == 0) 
-	    {
-	      model=NEG_BINOM;
-	    }
-	}
-      if (strcmp(argv[argi], "--var")==0) 
+      if (strcmp(argv[argi], "--nbvar")==0) 
 	{
 	  argi++;
 	  if (argi < argc) 
 	    {
+	      model=NEG_BINOM;
 	      var=atof(argv[argi]);	      
 	    }
 	}
@@ -342,16 +364,6 @@ int main(int argc, const char * argv[]) {
     file.close();
 
     size_t nObservations=observations.size();
-
-
-    size_t div=2;
-
-    if (std::stoi(argv[6])==1){
-        div=1;
-    }
-  file.close();
-  
-  size_t nObservations=observations.size();
 
 
   size_t mean= std::floor( std::stoi(argv[2]) /div );
