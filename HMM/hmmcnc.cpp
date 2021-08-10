@@ -449,7 +449,7 @@ void ParseChrom(ThreadInfo *threadInfo) {
       reads.resize(0);
       pthread_mutex_lock(threadInfo->semaphore);
       int bufSize=0;
-      while (bufSize < 100000000 and continueParsing) {
+      while (bufSize < 500000000 and continueParsing) {
 	bam1_t *b = bam_init1();	
 	int res=sam_itr_next(threadInfo->htsfp, regionIter, b);
 	bufSize+= b->l_data;
@@ -463,7 +463,7 @@ void ParseChrom(ThreadInfo *threadInfo) {
 	reads.push_back(b);
 	++totalReads;
       }
-      cerr << "Reading contig index " << curSeq << "\t(chumk " << chunkNumber << ")\t" << region << "\t" << (*threadInfo->contigNames)[curSeq] << " " << reads.size() << "\t" << totalReads << endl;
+      cerr << "Reading contig index " << curSeq << " (chunk " << chunkNumber << ")\t" << (*threadInfo->contigNames)[curSeq] << " " << reads.size() << "\t" << totalReads << endl;
       ++chunkNumber;
       pthread_mutex_unlock(threadInfo->semaphore);
 
