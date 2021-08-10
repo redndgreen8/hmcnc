@@ -767,19 +767,22 @@ int main(int argc, const char* argv[]) {
     exit(1);
   }
 
-  vector<string> contigNames;
-  vector<int>    contigLengths;
+  vector<string> contigNames, allContigNames;
+  vector<int>    contigLengths, allContigLengths;
   while (faiIn) {
     string line;
     getline(faiIn, line);
     stringstream strm(line);
     if (line != "") {
       string contig;
+      int length;
+      
       strm >> contig;
+      strm >> length;      
+      allContigNames.push_back(contig);
+      allContigLengths.push_back(length);
       if (hmmChrom == "" or contig == hmmChrom) {
 	contigNames.push_back(contig);
-	int length;
-	strm >> length;
 	contigLengths.push_back(length);
       }
     }
@@ -789,7 +792,7 @@ int main(int argc, const char* argv[]) {
   double mean;
   double var;
   
-  EstimateCoverage(bamFileName, contigNames, contigLengths, useChrom, mean, var);
+  EstimateCoverage(bamFileName, allContigNames, allContigLengths, useChrom, mean, var);
   cerr << "Got cov " << mean << "\t" << var << endl;
   
   //
