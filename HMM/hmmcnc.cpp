@@ -460,6 +460,7 @@ void ParseChrom(ThreadInfo *threadInfo) {
     // Deal with race condition by double checking curSeq;
     //
     if (curSeq >= threadInfo->contigNames->size()) {
+      pthread_mutex_unlock(threadInfo->semaphore);      
       break;
     }
 
@@ -486,6 +487,7 @@ void ParseChrom(ThreadInfo *threadInfo) {
     long totalSize=0;
     int chunkNumber=0;
     int totalReads=0;
+    int endpos=0;
     while (continueParsing) {
       int totalSize=0;
       reads.resize(0);
@@ -502,10 +504,11 @@ void ParseChrom(ThreadInfo *threadInfo) {
 	  cerr << "Ending parsing of " << region << " with " << totalSize << " data and " << chunkNumber << " iterations on res " << res << endl;
 	  break;
 	}
+	endpos=bam_endpos(b);
 	reads.push_back(b);
 	++totalReads;
       }
-      cerr << "Reading contig index " << curSeq << " (chunk " << chunkNumber << ")\t" << (*threadInfo->contigNames)[curSeq] << " " << reads.size() << "\t" << totalReads << endl;
+      cerr << "Reading contig index " << curSeq << " (chunk " << chunkNumber << ")\t" << (*threadInfo->contigNames)[curSeq] << " " << reads.size() << "\t" << totalReads << " ending at " << endpos << endl;
       ++chunkNumber;
       pthread_mutex_unlock(threadInfo->semaphore);
 
@@ -719,16 +722,18 @@ int main(int argc, const char* argv[]) {
   double scale=10;
   
   if (argc < 3) {
-    cout << "usage: hmmcnc input.bam reference.fa" << endl	       
-	 << "    The per nucleotide frequency will be calculated " << endl
+    cout << "usage: hmmcnc input.bam reference.fa" << endl
+	 << " Options controlling depth calculation " << endl
+	 << "   -e value (float)   Value of log-epsilon (-500)." << endl      
+	 << "   -s value (float)   Scalar for transition probabilities (pre Baum-Welch) (10)" << endl
+	 << "   -m value [pois|nb] Coverage model to use, Poisson (pois), or negative binomial (nb). Default nb." << endl
+	 << "   -x value Max state to allow (10)" << endl
+	 << " -t value (int)     Number of threads (4) " << endl            
+	 << " -c contig          Use this contig to estimate coverage. By default, longest contig." << endl      
+	 << " Options controlling output:" << endl
          << " -o file            Output to this file (stdout)." << endl
-	 << " -t value (int)     Number of threads (4) " << endl
-	 << " -c contig          Use this contig to estimate coverage. By default, longest contig." << endl
-	 << " -C contig          Only run hmm on this chrom." << endl      
-	 << " -e value (float)   Value of log-epsilon (-500)." << endl      
-	 << " -s value (float)   Scalar for transition probabilities (pre Baum-Welch) (10)" << endl
-	 << " -m value [pois|nb] Coverage model to use, Poisson (pois), or negative binomial (nb). Default nb." << endl
-	 << " -x value Max state to allow (10)" << endl;
+	 << " -C contig          Only run hmm on this chrom." << endl
+	 << " -M (flag)          Merge consecutive bins with the same copy number." << endl;
     exit(1);
   }
   NucMap.resize(256,4);
@@ -744,6 +749,7 @@ int main(int argc, const char* argv[]) {
   string useChrom="";
   string hmmChrom="";
   string outFileName="";
+  bool mergeBins=false;
   if (argc > 3) {
     int argi=3;
     while (argi < argc) {
@@ -776,6 +782,9 @@ int main(int argc, const char* argv[]) {
       else if (strcmp(argv[argi], "-C") == 0) {
 	++argi;
 	hmmChrom = argv[argi];
+      }
+      else  if (strcmp(argv[argi], "-M") == 0) {
+	mergeBins=true;
       }
       ++argi;
     }
@@ -971,9 +980,21 @@ int main(int argc, const char* argv[]) {
   for (int procIndex = 0; procIndex < nproc; procIndex++) {
     pthread_join(threads[procIndex], NULL);
   }
-  for (int c=0; c < contigNames.size(); c++) {
-    for (int b=0; b < copyNumber[c].size(); b++) {
-      (*outPtr) << contigNames[c] << "\t" << b*BIN_LENGTH << "\t" << min((b+1)*BIN_LENGTH, contigLengths[c]) << "\t" << covBins[c][b] << "\t" << copyNumber[c][b] << endl;
+  if (mergeBins == false) {
+    for (int c=0; c < contigNames.size(); c++) {
+      for (int b=0; b < copyNumber[c].size(); b++) {
+	(*outPtr) << contigNames[c] << "\t" << b*BIN_LENGTH << "\t" << min((b+1)*BIN_LENGTH, contigLengths[c]) << "\t" << covBins[c][b] << "\t" << copyNumber[c][b] << endl;
+      }
+    }
+  }
+  else {
+    for (int c=0; c < contigNames.size(); c++) {
+      int start=0;
+      int b=0;
+      long totCov=0;
+      while (b < copyNumber[c].size() and copyNumber[c][b] == copyNumber[c][start]) { totCov+=covBins[c][b]; b++;}
+      (*outPtr) << contigNames[c] << "\t" << start*BIN_LENGTH << "\t" << b *BIN_LENGTH << "\t" << totCov/(b-start) << "\t" << copyNumber[c][start] << endl;
+      start=b;
     }
   }
   /*
