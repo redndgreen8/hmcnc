@@ -678,14 +678,13 @@ int EstimateCoverage(string &bamFileName, vector<string> &chroms, vector<int> &l
 int main(int argc, const char* argv[]) {
   int nproc=4;
   double scale=10;
-
+  
   if (argc < 3) {
     cout << "usage: hmmcnc input.bam reference.fa" << endl	       
 	 << "    The per nucleotide frequency will be calculated " << endl
-	 << "    for the bam file for every region specified in regions.txt" << endl
-	 << "    This file has one region per line, in the format chrom:start-end" << endl
 	 << " -t value (int) Number of threads (4) " << endl
 	 << " -c contig  Use this contig to estimate coverage. By default, longest contig." << endl
+	 << " -C contig  Only run hmm on this chrom." << endl      
 	 << " -e value (float) Value of log-epsilon (-500)." << endl      
 	 << " -s value (float) Scalar for transition probabilities (pre Baum-Welch) (10)" << endl
 	 << " -m value [pois|nb] Coverage model to use, Poisson (pois), or negative binomial (nb). Default nb." << endl
@@ -702,7 +701,8 @@ int main(int argc, const char* argv[]) {
   string referenceName=argv[2];
   typedef enum { POIS, NEG_BINOM  } MODEL_TYPE;
   MODEL_TYPE model=NEG_BINOM;
-
+  string useChrom="";
+  string hmmChrom="";
   if (argc > 3) {
     int argi=3;
     while (argi < argc) {
@@ -724,14 +724,18 @@ int main(int argc, const char* argv[]) {
 	  model=POIS;
 	}
       }
+      else if (strcmp(argv[argi], "-c") == 0) {
+	++argi;
+	useChrom = argv[argi];
+      }
+      else if (strcmp(argv[argi], "-C") == 0) {
+	++argi;
+	hmmChrom = argv[argi];
+      }
       ++argi;
     }
   }
 
-
-
-
-  
   string faiFileName=referenceName + ".fai";
   ifstream faiIn(faiFileName.c_str());
   if (faiIn.good() == false) {
@@ -748,17 +752,20 @@ int main(int argc, const char* argv[]) {
     if (line != "") {
       string contig;
       strm >> contig;
-      contigNames.push_back(contig);
-      int length;
-      strm >> length;
-      contigLengths.push_back(length);
+      if (hmmChrom == "" or contig == hmmChrom) {
+	contigNames.push_back(contig);
+	int length;
+	strm >> length;
+	contigLengths.push_back(length);
+      }
     }
   }
 
-  string empty="";
+
   double mean;
   double var;
-  EstimateCoverage(bamFileName, contigNames, contigLengths, empty, mean, var);
+  
+  EstimateCoverage(bamFileName, contigNames, contigLengths, useChrom, mean, var);
   cerr << "Got cov " << mean << "\t" << var << endl;
   
   //
