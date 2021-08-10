@@ -558,6 +558,7 @@ int EstimateCoverage(string &bamFileName, vector<string> &chroms, vector<int> &l
       }
     }
   }
+  cerr << "Estimating coverage from " << useChrom << endl;
   int contigLength=0;
   for (int i=0; i < chroms.size(); i++) {
     if (chroms[i] == useChrom) {
