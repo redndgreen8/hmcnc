@@ -301,7 +301,7 @@ void viterbi( vector<double> &startP,
 	  opt[i][k] = maxState;	  
         }
     }
-
+  /*
   for(int k=nObservations -1 ; k>0 ; k--)
     {
       size_t obs = std::min(maxAllowedCov, observations[k-1]);
@@ -321,7 +321,7 @@ void viterbi( vector<double> &startP,
 	  opt[i][k-1] = maxState;	  
         }
     }
-  
+  */
   
   /*
   for (size_t k=1; k <nObservations; k++) {
@@ -539,7 +539,7 @@ void ParseChrom(ThreadInfo *threadInfo) {
       //
       double chromMean;
       long chromTot=0;
-      viterbi( *threadInfo->startP, *threadInfo->transP, *threadInfo->emisP, (*threadInfo->covBins)[curSeq], threadInfo->mean, (*threadInfo->copyNumber)[curSeq], threadInfo->maxCov);
+      viterbi( *threadInfo->startP, *threadInfo->transP, *threadInfo->emisP, (*threadInfo->covBins)[curSeq], threadInfo->mean, (*threadInfo->copyNumber)[curSeq], threadInfo->maxCov);      
     }
   }
   pthread_exit(NULL);    
@@ -705,7 +705,7 @@ int EstimateCoverage(string &bamFileName, vector<string> &chroms, vector<int> &l
       var=totCovSq/nSamples-mean*mean;
       cerr << "Estimating coverage " << nReads << " ending at " << curEndPos << "\t" << mean << "\t" << var << endl;
     }
-    if (nSamples > 40000) {
+    if (nSamples > 80000) {
       return 1;
     }
   }
@@ -785,6 +785,9 @@ int main(int argc, const char* argv[]) {
       }
       else  if (strcmp(argv[argi], "-M") == 0) {
 	mergeBins=true;
+      }
+      else if (strcmp(argv[argi], "--earlyExit") == 0) {
+	++argi;
       }
       ++argi;
     }
@@ -991,10 +994,12 @@ int main(int argc, const char* argv[]) {
     for (int c=0; c < contigNames.size(); c++) {
       int start=0;
       int b=0;
-      long totCov=0;
-      while (b < copyNumber[c].size() and copyNumber[c][b] == copyNumber[c][start]) { totCov+=covBins[c][b]; b++;}
-      (*outPtr) << contigNames[c] << "\t" << start*BIN_LENGTH << "\t" << b *BIN_LENGTH << "\t" << totCov/(b-start) << "\t" << copyNumber[c][start] << endl;
-      start=b;
+      while (b < copyNumber[c].size()) {
+	long totCov=0;	
+	while (b < copyNumber[c].size() and copyNumber[c][b] == copyNumber[c][start]) { totCov+=covBins[c][b]; b++;}
+	(*outPtr) << contigNames[c] << "\t" << start*BIN_LENGTH << "\t" << b *BIN_LENGTH << "\t" << totCov/(b-start) << "\t" << copyNumber[c][start] << endl;
+	start=b;
+      }
     }
   }
   /*
