@@ -17,6 +17,7 @@
 #include <iomanip>
 #include <boost/math/distributions/poisson.hpp>
 #include <boost/math/distributions/negative_binomial.hpp>
+#include <istream>
 
 using boost::math::poisson;
 using boost::math::pdf;
@@ -31,14 +32,36 @@ int BIN_LENGTH=100;
 int MAX_CN=10;
 float MISMAP_RATE=0.01;
 using namespace std;
-double lepsi=-500;
+double lepsi=-50;
 
 class SNV {
 public:
+  char refNuc, altNuc;
   int ref;
   int alt;
   int pos;
+  SNV(int p, int r, int a, int rc, int ac) : pos(p), refNuc(r), altNuc(a), ref(rc), alt(ac) {}
 };
+void Reset(vector<vector<vector<double> > > &v) {
+  for (int i=0; i < v.size(); i++) {
+    for (int j=0; j < v[i].size(); j++) {
+      fill(v[i][j].begin(), v[i][j].end(), 0);
+    }
+  }
+}
+
+double PairSumOfLogP(double a, double  b) {
+  double res=b;
+  if (a!= 0) {
+    double m=max(a,b);
+    double diff=min(a,b) - m;
+    double e=exp(diff);
+    double lg=log(1+e);
+    res=m + lg;
+  }
+
+  return res;
+}
 
 double SumOfLogP(vector<double> &vals) {
   if (vals.size() == 0) {
@@ -63,6 +86,7 @@ public:
   bam_hdr_t *samHeader;			
   faidx_t *fai;
   int *lastSeq;
+  string refFileName;
   pthread_mutex_t *semaphore;
   vector<string> *contigNames;
   vector<int>    *contigLengths;
@@ -79,21 +103,73 @@ public:
   double scale;
 };
 
+//
+// Not super 
+void ReadCoverage(string &covFileName,
+		  vector<string> &contigNames,
+		  vector<vector<int> > &covBins) {
+  ifstream covFile(covFileName.c_str());
+  string chrom="", curChrom;
+  int start, end;
+  int cov;
+  int last=0;
+  int length;
+  covFile.seekg(0, std::ios::end);    // go to the end
+  length = covFile.tellg();           // report location (this is the length)
+  covFile.seekg(0, std::ios::beg);    // go back to the beginning
+  char *buffer = new char[length];    // allocate memory for a buffer of appropriate dimension
+  covFile.read(buffer, length);       // read the whole file into the buffer
+  cerr << "read cov buffer of len " << length << endl;
+  covFile.close();  
+  int i=0;
+  string contigName("");
+  int curContig=0;
+  if (length > 0) {
+    covBins.push_back(vector<int>() );
+  }
+  while (i < length) {
+    while (i < length and isspace(buffer[i])) { i++; }
+    int c=i;    
+    while (i < length and isspace(buffer[i]) == false)  { i++; }
+    if (i < length) {
+      if (i-c > contigName.size()) { contigName.resize(i-c);}
+      sscanf(&buffer[c], "%s", contigName.c_str());
+      sscanf(&buffer[i], "%d	%d	%d", &start, &end, &cov);
+      if (contigName != contigNames[curContig]) {
+	covBins.push_back(vector<int>());
+	curContig++;	
+      }
+      covBins[curContig].push_back(cov);
+    }
+    while (i < length and buffer[i] != '\n') { i++;};
+  }
+}
+
+void WriteCovBed(string &covFileName,
+		 vector<string> &contigNames,
+		 vector<vector<int> > &covBins) {
+  ofstream covFile(covFileName.c_str());
+  for (int c=0; c < contigNames.size(); c++) {
+    for (int i=0; i < covBins[c].size(); i++) {
+      covFile << contigNames[c] << "\t" << i*100 << "\t" << (i+1)*100 << "\t" << covBins[c][i] << endl;
+    }
+  }
+}
 
 static void printModel(vector<vector<double> > &transP)
 {
-
-  cerr << "\nTRANS: \n";
+  ostream* strm =&cout;
+  *strm << "\nTRANS: \n";
   for (int r=0;r<transP.size();r++)
     {
-      cerr << r <<": ";
+      *strm << r <<":";
       for (int c=0;c<transP[r].size();c++)
         {
-	  cerr << transP[r][c] << " ";
+	  *strm << "\t"<< transP[r][c];
         }
-      cerr << "\n";
+      *strm << endl;
     }
-  cerr<< "\n";
+  *strm << endl;
 }
 
 static void printEmissions(vector<vector<double> > &emisP)
@@ -255,7 +331,171 @@ static void correctModel(vector<vector<double> > &transP,
     }
 }//correctModel
 
+void ForwardBackwards( vector<double> &startP,
+		       vector<vector<double> > &transP,
+		       vector<vector<double> > &emisP,
+		       vector<int> &obs,
+		       vector<vector<double> > &f,
+		       vector<vector<double> > &b) {
+  int nObs=obs.size();
+  int nStates=startP.size();
+  //
+  // Initialize first col from standing.
+  //
 
+  // f and b are of length nObs+1
+  // The first/last prob from an observation are at:
+  //  f[1], f[nObs], from obs[0...nObs-1]
+  //  and b[nObs], b[1] from obs[nObs-1 ... 0]
+  // 
+ 
+  for (int j=0; j < nStates; j++) {
+    f[j][0] = startP[j];
+  }
+  vector<double> col(nStates, 0);
+  //
+  // Shouldn't have 0 states. Even if the coverage is empty for
+  // an entire chrom, should have 0 state.
+  //
+  assert(nStates > 0);  
+  //
+  // If just one state (e.g. all zeros), same prob.
+  //
+
+  if (nStates == 1) {
+    fill(f[0].begin(), f[0].end(), -1);
+    fill(b[0].begin(), b[0].end(), -1);
+    return;
+  }
+  
+  for (int k=0; k < nObs; k++) {
+    cout << "f: " << k << "\t" << obs[k];
+    for (int i=0; i < nStates; i++) {
+      double colSum=0;
+      for (int j=0; j < nStates; j++) {
+	colSum = PairSumOfLogP(colSum, f[j][k] + transP[j][i]);
+      }
+      f[i][k+1] = colSum + emisP[i][obs[k]];
+      cout << "\t" << f[i][k+1];
+    }
+    cout << endl;
+  }
+
+  // back
+  for (int j=0; j < nStates; j++) {
+    b[j][nObs] = startP[j];
+  }
+
+  for (int k=nObs; k > 0; k--) {
+    for (int i=0; i < nStates; i++) {
+      double colSum=0;
+      for (int j=0; j < nStates; j++) {
+	colSum = PairSumOfLogP(colSum, b[j][k] + transP[j][i]);
+      }
+      b[i][k-1] = colSum + emisP[i][obs[k-1]];
+    }      
+  }
+
+  for (int k=0; k< nObs; k++) {
+    double max=0;
+    double sum=0;
+    int maxi=0;
+    double pSum=0;
+    cout << k << "\t" << obs[k];
+    for (int s=0; s < nStates; s++) {
+      pSum = f[s][k] + b[s][k+1];
+      cout << "\t" << pSum;
+      sum = PairSumOfLogP(sum, pSum);
+      if (max == 0 or max < pSum) {
+	max=pSum;
+	maxi=s;
+      }
+    }
+
+    if (sum !=  0) {
+      cout << "\tPD:\t" << maxi << "\t" << exp(max-sum) << "\t" << obs[k];
+    }
+    cout << endl;
+  }
+}
+
+void BaumWelchEMStep(vector<double> &startP,
+		     vector<vector<double> > &transP,
+		     vector<vector<double> > &emisP,
+		     vector<int> &obs,
+		     vector<vector<double > > &f,
+		     vector<vector<double> > &b,
+		     vector<vector<double> > &updateTransP,
+		     vector<vector<double> > &updateEmisP) {
+  int nStates = startP.size();
+  ForwardBackwards( startP, transP, emisP, obs, f, b);
+
+  vector<vector<double > > expTransP, expEmisP;
+  expTransP.resize(transP.size());
+  expEmisP.resize(emisP.size());
+
+
+  //
+  // E step
+  //
+  for (int j=0; j < transP.size(); j++) {
+    expTransP[j].resize(transP[j].size());
+    for (int k=0; k < transP[j].size(); k++) {
+      double logSum=0;
+      for (int i=0; i< obs.size()-1; i++) {
+	assert(j < f.size());
+	assert(i < f[j].size());
+	assert(j < transP.size());
+	assert(k < transP[j].size());
+	assert(j < emisP.size());
+	assert(obs[i] < emisP[j].size());
+	//	cout << "BW: " << j << " " << k << "\t" << logSum << "\ttot: " << f[j][i] + transP[j][k] + emisP[j][obs[i+1]] + b[k][i+1] << "\t" << "\tf: " << f[j][i] << "\tt: " << transP[j][k] << "\te: " << emisP[j][obs[i+1]] << "\tb: " << b[k][i+1] << "\t";
+	logSum = PairSumOfLogP(logSum, f[j][i] + transP[j][k] + emisP[j][obs[i+1]] + b[k][i+1]);
+      }
+      expTransP[j][k] = logSum;
+    }
+  }
+  for (int k=0; k < nStates; k++) {
+    expEmisP[k].resize(emisP[k].size());
+    fill(expEmisP[k].begin(), expEmisP[k].end(), 0);
+    for (int i=0; i < obs.size(); i++) {
+      expEmisP[k][obs[i]] = PairSumOfLogP(expEmisP[k][obs[i]], f[k][i] + b[k][i+1]);
+    }    
+  }
+  //
+  // M step.
+  //
+  updateTransP.resize(nStates);
+  for (int j=0; j < nStates; j++) {
+    double colSum=0;
+    updateTransP[j].resize(nStates);
+    for (int k=0; k< nStates; k++) {
+      colSum=PairSumOfLogP(colSum, expTransP[j][k]);
+    }
+    for (int k=0; k< nStates; k++) {
+      updateTransP[j][k] = expTransP[j][k] - colSum;
+    }
+  }
+  updateEmisP.resize(nStates);
+  for (int j=0; j < nStates; j++) {
+    updateEmisP[j].resize(emisP[j].size());
+    double denom=0;
+    for (int i=0; i < expEmisP[j].size(); i++) {
+      denom = PairSumOfLogP(denom, expEmisP[j][i]);
+    }
+
+    for (int i=0; i < expEmisP[j].size(); i++) {
+      if (denom > 0) {
+	updateEmisP[j][i] = expEmisP[j][i] - denom;
+      }
+      else {
+	updateEmisP[j][i] = 0;
+      }
+    }
+  }  
+}
+		
+  
 
 void viterbi( vector<double> &startP,
 	      vector<vector<double> > &transP,
@@ -301,45 +541,6 @@ void viterbi( vector<double> &startP,
 	  opt[i][k] = maxState;	  
         }
     }
-  /*
-  for(int k=nObservations -1 ; k>0 ; k--)
-    {
-      size_t obs = std::min(maxAllowedCov, observations[k-1]);
-      for(size_t i=0;i<nStates;i++)
-        {
-	  double maxProb = v[0][k] + transP[0][i];
-	  int maxState=0;
-	  for(size_t j=1;j<nStates;j++)
-            {
-	      double rowProb = v[j][k] + transP[j][i];
-	      if (rowProb > maxProb) {
-		maxState=j;
-		maxProb=rowProb;
-	      }
-            }
-	  v[i][k-1] = emisP[i][obs] + maxProb;
-	  opt[i][k-1] = maxState;	  
-        }
-    }
-  */
-  
-  /*
-  for (size_t k=1; k <nObservations; k++) {
-    cout << k << "\t" << observations[k] << "\t";
-    for (size_t i=0; i < nStates; i++) {
-      cout << std::setw(8) << v[i][k] << " ";
-    }
-    cout << endl;
-  }
-
-  for (size_t k=1; k <nObservations; k++) {
-    cout << k << "\t" << observations[k] << "\t";
-    for (size_t i=0; i < n States; i++) {
-      cout << std::setw(4 ) << opt[i][k] << " ";
-    }
-    cout << endl;
-  }
-  */
       
   // Traceback
   for(size_t i=0;i<nStates;i++)
@@ -373,6 +574,60 @@ void viterbi( vector<double> &startP,
 
 }//viterbi
 
+class CountNuc {
+public:
+  int index;
+  int count;
+  int operator<(const CountNuc &rhs) {
+    return count < rhs.count;
+  }
+};
+
+int StoreSNVs(char *contigSeq,
+	      int contigLength,
+	      float mean,
+	      vector<int> &nA, vector<int> &nC, vector<int> &nG, vector<int> &nT, vector<int> &nDel,
+	      vector<SNV> &snvs) {
+  vector<int* > fPtr(5);
+  //
+  // Easier for typing
+  //
+  const char *nucs="ACGTd";
+  fPtr[0] = &nA[0];
+  fPtr[1] = &nC[0];
+  fPtr[2] = &nG[0];
+  fPtr[3] = &nT[0];
+  fPtr[4] = &nDel[0];
+  vector<CountNuc > counts;
+  counts.resize(5);
+  for (int i =0; i < contigLength; i++) {
+    for (int n=0; n < 5; n++) {
+      counts[n].index=n;
+      counts[n].count = fPtr[n][i];
+    }
+    sort(counts.begin(), counts.end());
+    char refNuc=toupper(contigSeq[i]);
+    if (counts[4].index != 4 and
+	counts[3].index != 4 and
+	refNuc != 'N' and
+	counts[3].count > 0.25*mean and
+	counts[4].count > 0.25*mean )  {
+      //
+      // Top most frequent are not a deletion.
+      //
+      if (nucs[counts[4].index] == refNuc) {
+	snvs.push_back(SNV(i, refNuc, nucs[counts[3].index], counts[4].count, counts[3].count));
+      }
+      else if (nucs[counts[3].index] == refNuc) {
+	snvs.push_back(SNV(i, refNuc, nucs[counts[4].index], counts[4].count, counts[3].count));
+      }
+
+    }
+  }
+  return 1;
+}
+
+
 int IncrementCounts(bam1_t *b,
 		    int contigLength,
 		     vector<int> &nA, vector<int> &nC, vector<int> &nG, vector<int> &nT, vector<int> &nDel) {
@@ -386,7 +641,7 @@ int IncrementCounts(bam1_t *b,
   for (int i=0; i < readLength; i++) {seq[i]=seq_nt16_str[bam_seqi(q,i)];	}
   uint32_t* cigar = bam_get_cigar(b);
   int refLen = bam_cigar2rlen(b->core.n_cigar, cigar);
-  //			cout << bam_get_qname(b)  << "\t" << refLen << "\t" << (int) b->core.qual << "\t" << (int) b->core.flag << endl;			
+
   int qPos=0;
   int refPos = b->core.pos;
   int ci;
@@ -481,6 +736,8 @@ void ParseChrom(ThreadInfo *threadInfo) {
 
 
     hts_itr_t *regionIter = sam_itr_querys(threadInfo->bamidx, threadInfo->samHeader, region.c_str());
+    int chromLen;
+    char *chromSeq = fai_fetch(threadInfo->fai, region.c_str(), &chromLen);
     
     bool continueParsing=true;
     vector<bam1_t*> reads; //(bam_init1());
@@ -534,18 +791,23 @@ void ParseChrom(ThreadInfo *threadInfo) {
     //
     // Detect SNVS
     //        
+    StoreSNVs(chromSeq, chromLen, threadInfo->mean,
+	      nA, nC, nG, nT, nDel,
+	      (*threadInfo->snvs)[curSeq]);
+    cerr << "Stored " << (*threadInfo->snvs)[curSeq].size() << " snvs " << endl;
     
+  }
+  pthread_exit(NULL);    
+}
+    
+/*
     if ((*threadInfo->covBins)[curSeq].size() > 0) { 
       //
       double chromMean;
       long chromTot=0;
       viterbi( *threadInfo->startP, *threadInfo->transP, *threadInfo->emisP, (*threadInfo->covBins)[curSeq], threadInfo->mean, (*threadInfo->copyNumber)[curSeq], threadInfo->maxCov);      
     }
-  }
-  pthread_exit(NULL);    
-}
-    
-
+*/
 
 vector<int> NucMap;
 int GetRefAndAlt(char refNuc, vector<int> &counts, int &ref, int &alt) {
@@ -590,14 +852,15 @@ const char* nucs = "ACGTN";
 static int pileup_blank(void *data, bam1_t *b) {
   return 0;
 }
-int EstimateCoverage(string &bamFileName, vector<string> &chroms, vector<int> &lengths, string &useChrom, double &mean, double &var) {
-
+int EstimateCoverage(string &bamFileName, vector<vector<int> > &allCovBins, vector<string> &chroms, vector<int> &lengths, string &useChrom, double &mean, double &var) {
+  int useChromIndex=0;
   if (useChrom == "") {
     int maxLen=0;
     for (int i=0; i < lengths.size(); i++) {
       if (lengths[i] > maxLen) {
 	useChrom = chroms[i];
 	maxLen=lengths[i];
+	useChromIndex=i;
       }
     }
   }
@@ -606,107 +869,144 @@ int EstimateCoverage(string &bamFileName, vector<string> &chroms, vector<int> &l
   for (int i=0; i < chroms.size(); i++) {
     if (chroms[i] == useChrom) {
       contigLength=lengths[i];
+      useChromIndex=i;
       break;
     }
   }
+  
   if (contigLength == 0) {
     cerr << "ERROR Could not estimate coverage." <<endl;
     exit(1);
   }
-  
-  htsFile *htsfp;
-    
-  htsfp = hts_open(bamFileName.c_str(),"r");
-  
-  hts_idx_t *bamidx;
-  if ((bamidx = sam_index_load(htsfp, bamFileName.c_str())) == 0) {
-    cerr << "ERROR reading index" << endl;
-    exit(0);
-  }
-
-  const htsFormat *fmt = hts_get_format(htsfp);
-  if (fmt == NULL or (fmt->format != sam and fmt->format != bam)) {
-    cout << "Cannot determine format of input reads." << endl;
-    exit(1);
-  }
-
-  bam_hdr_t *samHeader;			
-  samHeader = sam_hdr_read(htsfp);
-  
-  hts_itr_t *regionIter = sam_itr_querys(bamidx, samHeader, useChrom.c_str());
-
-  vector<int> nA(contigLength, 0), nC(contigLength, 0), nT(contigLength, 0), nG(contigLength,0), nDel(contigLength, 0);
-  
-  
-  bool continueParsing=true;
-  int nSamples=0;
-  vector<int> covBins(contigLength/100+1);
-  int curEndPos=0;
-  int curCovBin=0;
-  long totalSize;
-  
-  while (continueParsing) {    
-    int bufSize=0;
-    int nReads=0;
-    while (bufSize < 100000000 and continueParsing) {
-      bam1_t *b = bam_init1();	
-      int res=sam_itr_next(htsfp, regionIter, b);
-      bufSize+= b->l_data;
-      totalSize+= b->l_data;
-	
-      if (res < 0) {
-	continueParsing = false;
-	break;
-      }
-      if (IncrementCounts(b, contigLength, nA, nC, nG, nT, nDel)) {
-	curEndPos=bam_endpos(b);
-      }
-      bam_destroy1(b);
-      ++nReads;
+  if (allCovBins.size() > 0) {
+    assert(allCovBins[useChromIndex].size() == lengths[useChromIndex]/100);
+    int lastBin=allCovBins[useChromIndex].size();
+    if (lastBin == 0) {
+      cerr << "ERROR. Could not estimate coverage using precomputed bins." << endl;
+      exit(1);
     }
-
-    //
-    // Compute coverage for bins
-    int lastBin=(curEndPos-30000)/100;
-    for (int binIndex=curCovBin; binIndex < lastBin; binIndex++) {
-      int binTot=0;
-      for (int nuc=binIndex*100; nuc < (binIndex+1)*100; nuc++) {
-	binTot += nA[nuc] + nC[nuc]+ nG[nuc] + nT[nuc] + nDel[nuc];
-      }
-      covBins[binIndex] = binTot/100;
-
-    }
-    curCovBin=lastBin;
-    //
-    // Get summary statistics
-    //
-    double totCov=0;
-    double totCovSq=0;
-    //
-    // First pass gets close to CN=2
-    //
-    
+    long totCov=0;
     for (int binIndex=0; binIndex<lastBin; binIndex++) {
-      totCov+=covBins[binIndex];
+      totCov+=allCovBins[useChromIndex][binIndex];
     }
-
     mean=totCov/lastBin;
+    //
+    // Recompute summary stats using limited data
+    int nSamples=0;
     totCov=0;
-    nSamples=0;
+    long totCovSq=0;
     for (int binIndex=0; binIndex<lastBin; binIndex++) {
-      if (covBins[binIndex] > 0.25*mean and covBins[binIndex] < 1.75 * mean) {
-	totCov+=covBins[binIndex];
-	totCovSq+=covBins[binIndex]*covBins[binIndex];
+      if (allCovBins[useChromIndex][binIndex] > 0.25*mean and allCovBins[useChromIndex][binIndex] < 1.75 * mean) {
+	totCov+=allCovBins[useChromIndex][binIndex];
+	totCovSq+=allCovBins[useChromIndex][binIndex]*allCovBins[useChromIndex][binIndex];
 	nSamples++;
       }
     }
     if (nSamples > 0) {
       mean=totCov/nSamples;
       var=totCovSq/nSamples-mean*mean;
-      cerr << "Estimating coverage " << nReads << " ending at " << curEndPos << "\t" << mean << "\t" << var << endl;
+      cerr << "Estimating coverage on precomputed bins " << nSamples << " ending at " << mean << "\t" << var << endl;
     }
-    if (nSamples > 80000) {
-      return 1;
+    else {
+      cerr << "Could not estimate coverage using precomputed coverage on chrom " << useChrom << endl;
+      exit(1);
+    }
+  }
+  else {
+    htsFile *htsfp;
+    vector<int> covBins;
+    htsfp = hts_open(bamFileName.c_str(),"r");
+  
+    hts_idx_t *bamidx;
+    if ((bamidx = sam_index_load(htsfp, bamFileName.c_str())) == 0) {
+      cerr << "ERROR reading index" << endl;
+      exit(0);
+    }
+    
+    const htsFormat *fmt = hts_get_format(htsfp);
+    if (fmt == NULL or (fmt->format != sam and fmt->format != bam)) {
+      cout << "Cannot determine format of input reads." << endl;
+      exit(1);
+    }
+
+    bam_hdr_t *samHeader;			
+    samHeader = sam_hdr_read(htsfp);
+    
+    hts_itr_t *regionIter = sam_itr_querys(bamidx, samHeader, useChrom.c_str());
+
+    vector<int> nA(contigLength, 0), nC(contigLength, 0), nT(contigLength, 0), nG(contigLength,0), nDel(contigLength, 0);
+  
+  
+    bool continueParsing=true;
+    int nSamples=0;
+    
+    int curEndPos=0;
+    int curCovBin=0;
+    long totalSize;
+    
+    while (continueParsing) {    
+      int bufSize=0;
+      int nReads=0;
+      while (bufSize < 100000000 and continueParsing) {
+	bam1_t *b = bam_init1();	
+	int res=sam_itr_next(htsfp, regionIter, b);
+	bufSize+= b->l_data;
+	totalSize+= b->l_data;
+	
+	if (res < 0) {
+	  continueParsing = false;
+	  break;
+	}
+	if (IncrementCounts(b, contigLength, nA, nC, nG, nT, nDel)) {
+	  curEndPos=bam_endpos(b);
+	}
+	bam_destroy1(b);
+	++nReads;
+      }
+
+      //
+      // Compute coverage for bins
+      int lastBin=(curEndPos-30000)/100;
+      for (int binIndex=curCovBin; binIndex < lastBin; binIndex++) {
+	int binTot=0;
+	for (int nuc=binIndex*100; nuc < (binIndex+1)*100; nuc++) {
+	  binTot += nA[nuc] + nC[nuc]+ nG[nuc] + nT[nuc] + nDel[nuc];
+	}
+	covBins.push_back(binTot/100);
+	
+      }
+      curCovBin=lastBin;
+    //
+    // Get summary statistics
+    //
+      double totCov=0;
+      double totCovSq=0;
+      //
+      // First pass gets close to CN=2
+      //
+      
+      for (int binIndex=0; binIndex<lastBin; binIndex++) {
+	totCov+=covBins[binIndex];
+      }
+
+      mean=totCov/lastBin;
+      totCov=0;
+      nSamples=0;
+      for (int binIndex=0; binIndex<lastBin; binIndex++) {
+	if (covBins[binIndex] > 0.25*mean and covBins[binIndex] < 1.75 * mean) {
+	  totCov+=covBins[binIndex];
+	  totCovSq+=covBins[binIndex]*covBins[binIndex];
+	  nSamples++;
+	}
+      }
+      if (nSamples > 0) {
+	mean=totCov/nSamples;
+	var=totCovSq/nSamples-mean*mean;
+	cerr << "Estimating coverage " << nReads << " ending at " << curEndPos << "\t" << mean << "\t" << var << endl;
+      }
+      if (nSamples > 80000) {
+	return 1;
+      }
     }
   }
   return 1;
@@ -719,13 +1019,16 @@ int EstimateCoverage(string &bamFileName, vector<string> &chroms, vector<int> &l
 
 int main(int argc, const char* argv[]) {
   int nproc=4;
-  double scale=10;
+  double scale=2;
   
   if (argc < 3) {
-    cout << "usage: hmmcnc input.bam reference.fa" << endl
-	 << " Options controlling depth calculation " << endl
+    cout << "usage: hmmcnc reference.fa" << endl
+         << "   -a alignments    Read alignments from this file and calculate depth on the fly." << endl
+         << "   -b bed           Read depth bed from this file. Skip calculation of depth." << endl
+         << "   -S snv-file      Read SNVs from this file (when not estimating from a BAM)" << endl
+	 << " Options controlling depth calculation " << endl      
 	 << "   -e value (float)   Value of log-epsilon (-500)." << endl      
-	 << "   -s value (float)   Scalar for transition probabilities (pre Baum-Welch) (10)" << endl
+	 << "   -S value (float)   Scalar for transition probabilities (pre Baum-Welch) (10)" << endl
 	 << "   -m value [pois|nb] Coverage model to use, Poisson (pois), or negative binomial (nb). Default nb." << endl
 	 << "   -x value Max state to allow (10)" << endl
 	 << " -t value (int)     Number of threads (4) " << endl            
@@ -733,6 +1036,7 @@ int main(int argc, const char* argv[]) {
 	 << " Options controlling output:" << endl
          << " -o file            Output to this file (stdout)." << endl
 	 << " -C contig          Only run hmm on this chrom." << endl
+         << " -B bed             Write coverage bed to this file." << endl
 	 << " -M (flag)          Merge consecutive bins with the same copy number." << endl;
     exit(1);
   }
@@ -742,21 +1046,40 @@ int main(int argc, const char* argv[]) {
   NucMap[(int)'G']=2;
   NucMap[(int)'T']=3;	
   int maxState=10;	
-  string bamFileName=argv[1];
-  string referenceName=argv[2];
+  string bamFileName="";
+  string referenceName=argv[1];
   typedef enum { POIS, NEG_BINOM  } MODEL_TYPE;
   MODEL_TYPE model=NEG_BINOM;
   string useChrom="";
   string hmmChrom="";
+  string covBedInFileName="", covBedOutFileName="";
+  bool   mergeBins=false;
+  string outBedName="";
   string outFileName="";
-  bool mergeBins=false;
-  if (argc > 3) {
-    int argi=3;
+  string snvFile="";
+  if (argc > 2) {
+    int argi=2;
     while (argi < argc) {
-      if (strcmp(argv[argi], "-t") == 0) {
+      if (strcmp(argv[argi], "-a") == 0) {
+	++argi;
+	bamFileName=argv[argi];
+      }
+      else if (strcmp(argv[argi], "-s") == 0) {
+	++argi;
+	snvFile=argv[argi];
+      }      
+      else if (strcmp(argv[argi], "-t") == 0) {
 	++argi;
 	nproc=atoi(argv[argi]);
       }
+      else if (strcmp(argv[argi], "-b") == 0) {
+	++argi;
+	covBedInFileName = argv[argi];
+      }
+      else if (strcmp(argv[argi], "-B") == 0) {
+	++argi;
+	covBedOutFileName = argv[argi];
+      }      
       else if (strcmp(argv[argi], "-e") == 0) {
 	++argi;
 	lepsi=atof(argv[argi]);
@@ -820,40 +1143,45 @@ int main(int argc, const char* argv[]) {
       }
     }
   }
-
-
+  vector<vector<int> > covBins;
   double mean;
   double var;
+  if (covBedInFileName != "") {
+    ReadCoverage(covBedInFileName, contigNames, covBins);
+  }
+
   
-  EstimateCoverage(bamFileName, allContigNames, allContigLengths, useChrom, mean, var);
+  EstimateCoverage(bamFileName, covBins, allContigNames, allContigLengths, useChrom, mean, var);
+  
   cerr << "Got cov " << mean << "\t" << var << endl;
   
   //
   // Get the header of the bam file
   //
-  htsFile *htsfp;
+  htsFile *htsfp=NULL;
+  bam_hdr_t *samHeader=NULL;
+  hts_idx_t *bamidx=NULL;
 
-  htsfp = hts_open(bamFileName.c_str(),"r");
-  bam_hdr_t *samHeader;			
-  samHeader = sam_hdr_read(htsfp);
-
+  
+  if (bamFileName != "") {
+    htsfp = hts_open(bamFileName.c_str(),"r");
+    samHeader = sam_hdr_read(htsfp);
+    if ((bamidx = sam_index_load(htsfp, bamFileName.c_str())) == 0) {
+      cerr << "ERROR reading index" << endl;
+      exit(0);
+    }
+    const htsFormat *fmt = hts_get_format(htsfp);
+    if (fmt == NULL or (fmt->format != sam and fmt->format != bam)) {
+      cout << "Cannot determine format of input reads." << endl;
+      exit(1);
+    }    
+  }
 
   faidx_t *fai = fai_load_format(referenceName.c_str(), FAI_FASTA);
 
   // 
   // Read index for random io
   //
-  hts_idx_t *bamidx;
-  if ((bamidx = sam_index_load(htsfp, bamFileName.c_str())) == 0) {
-    cerr << "ERROR reading index" << endl;
-    exit(0);
-  }
-
-  const htsFormat *fmt = hts_get_format(htsfp);
-  if (fmt == NULL or (fmt->format != sam and fmt->format != bam)) {
-    cout << "Cannot determine format of input reads." << endl;
-    exit(1);
-  }
 
   pthread_t *threads = new pthread_t[nproc];
   vector<ThreadInfo> threadInfo(nproc);		
@@ -861,16 +1189,21 @@ int main(int argc, const char* argv[]) {
   pthread_mutex_init(&semaphore, NULL);
   pthread_attr_t *threadAttr = new pthread_attr_t[nproc];
   int curSeq=0;
-  vector<vector<int> > covBins;
+
   vector<vector<SNV> > snvs;
-  vector<vector<int > > copyNumber;  
+  vector<vector<int > > copyNumber;
+  vector<vector< vector<double> > > f,b;
   copyNumber.resize(contigLengths.size());
 
-  covBins.resize(contigLengths.size());
-  for (int c=0; c < contigLengths.size(); c++ ) {
-    covBins[c].resize(contigLengths[c]/BIN_LENGTH);
-    copyNumber[c].resize(contigLengths[c]/BIN_LENGTH);       
-  }  
+  if (covBedInFileName == "") {
+    covBins.resize(contigLengths.size());
+    for (int c=0; c < contigLengths.size(); c++ ) {
+      covBins[c].resize(contigLengths[c]/BIN_LENGTH);
+      copyNumber[c].resize(contigLengths[c]/BIN_LENGTH);       
+    }
+  }
+
+
   //max cov value observed or upper cov bound -> max nState---------------
   size_t nStates= std::min( maxState , MAX_CN  ) + 1; //+1 zeroth state
   MAX_CN=nStates+1;
@@ -888,6 +1221,17 @@ int main(int argc, const char* argv[]) {
     startP[i]=log(1./(nStates));
   }
 
+  f.resize(covBins.size());
+  b.resize(covBins.size());
+  for (size_t c=0; c < covBins.size(); c++) {
+    f[c].resize(nStates);
+    b[c].resize(nStates);
+    for (size_t s=0; s < nStates; s++) {
+      f[c][s].resize(covBins[c].size() + 1);
+      b[c][s].resize(covBins[c].size() + 1);
+    }
+  }
+  
   // trans prob, scale 3->2 by overlap of pdf.
 
   poisson distribution1(3*mean/2);
@@ -901,36 +1245,47 @@ int main(int argc, const char* argv[]) {
   //*300
 
   //no epsi
-  double beta =  lepsi + ( scale * log(epsi23))  ;
+  double small=-2;
+  //  double beta =  small + ( scale * log(epsi23))  ;
+  double beta=small;
   //mean no. of bins for cn=3 call
 
   vector<vector<double> > transP(nStates, vector<double>(nStates));
+  vector<vector<double> > updateTransP(nStates, vector<double>(nStates));
+  double unif=log(1.0/nStates);
   for (size_t i=0;i<nStates;i++)
     {
       for (size_t j=0;j<nStates;j++)
         {
 	  if(i==j)
             {
-	      transP[i][j]= log(1 - std::exp(beta) );
+	      transP[i][j]= unif; //log(1 - std::exp(beta) );
             }
-            
-            
 	  else
             {
 	      if ( j==3)
                 {
-		  transP[i][j]= beta - log(nStates-1) ;
+		  transP[i][j]= unif; // beta - log(nStates-1) ;
                 }
 	      else
                 {
-		  transP[i][j]= beta - log(nStates-1);                
+		  transP[i][j]= unif; // beta - log(nStates-1);                
                 }
             }
         }
     }
   int maxCov=(int)mean/2*(maxState+1);
-  vector<vector<double> > emisP(nStates, vector<double>(maxCov));
+  vector<vector<double> > emisP(nStates, vector<double>(maxCov+1));
+  vector<vector<double> > updateEmisP(nStates, vector<double>(maxCov+1));  
 
+  //
+  // Cap coverage where hmm does not bother calculating.
+  //
+  for (size_t c=0; c < covBins.size(); c++) {
+    for (size_t b=0; b < covBins[c].size(); b++) {
+      covBins[c][b] = min(covBins[c][b], maxCov);
+    }
+  }
 
   for (size_t i=0;i<nStates;i++){
     for (size_t j=0;j<maxCov;j++){
@@ -943,13 +1298,26 @@ int main(int argc, const char* argv[]) {
     }
   }
 
+  printModel(transP);
+  printEmissions(emisP);
+  
+  //
+  // This data will be used for all threads.
+  //
   
   for (int procIndex = 0; procIndex < nproc; procIndex++) {
     pthread_attr_init(&threadAttr[procIndex]);
-    threadInfo[procIndex].htsfp = hts_open(bamFileName.c_str(),"r");
+    if (bamFileName != "") {
+      threadInfo[procIndex].htsfp = hts_open(bamFileName.c_str(),"r");
+      
+    }
+    else {
+      threadInfo[procIndex].htsfp = NULL;
+    }
     threadInfo[procIndex].bamidx = bamidx;
     threadInfo[procIndex].samHeader=samHeader;
-    threadInfo[procIndex].fai = fai;
+    threadInfo[procIndex].fai = fai_load_format(referenceName.c_str(), FAI_FASTA);
+    
     threadInfo[procIndex].lastSeq = &curSeq;
     threadInfo[procIndex].semaphore = &semaphore;
     threadInfo[procIndex].contigNames = &contigNames;
@@ -966,10 +1334,46 @@ int main(int argc, const char* argv[]) {
     threadInfo[procIndex].transP = &transP;
     threadInfo[procIndex].emisP = &emisP;
     threadInfo[procIndex].startP = &startP;
-
-    pthread_create(&threads[procIndex], &threadAttr[procIndex], (void* (*)(void*)) ParseChrom, &threadInfo[procIndex]);
   }
 
+  if (covBedInFileName == "") {
+    for (int procIndex = 0; procIndex < nproc; procIndex++) {  
+      pthread_create(&threads[procIndex], &threadAttr[procIndex], (void* (*)(void*)) ParseChrom, &threadInfo[procIndex]);
+    }
+      
+    for (int procIndex = 0; procIndex < nproc; procIndex++) {
+      pthread_join(threads[procIndex], NULL);
+    }
+
+    if (covBedOutFileName != "" ) {
+      WriteCovBed(covBedOutFileName, contigNames, covBins);
+    }
+  }
+
+  
+  printModel(transP);
+  for (int i=0; i < 10; i++) {
+    BaumWelchEMStep(startP, transP, emisP,
+		    covBins[0],
+		    f[0],b[0],
+		    updateTransP, updateEmisP);
+    
+    cout << "update" <<endl;
+    printModel(updateTransP);
+    transP=updateTransP;
+    //
+    // Gather per-state summary statistics
+    //
+    vector<long> stateTotCov(nStates, 0);
+    vector<int>  stateNSamples(nStates, 0);
+    
+    //emisP=updateEmisP;
+    
+    printModel(transP);
+    Reset(f);
+    Reset(b);
+  }
+  /*
   ofstream outFile;
   ostream *outPtr;
   if (outFileName == "" or outFileName == "-" or outFileName == "stdin" or outFileName == "/dev/stdin") {
@@ -977,12 +1381,11 @@ int main(int argc, const char* argv[]) {
   }
   else {
     outFile.open(outFileName.c_str());
-    outPtr = &outFile;
+      outPtr = &outFile;
   }
-      
-  for (int procIndex = 0; procIndex < nproc; procIndex++) {
-    pthread_join(threads[procIndex], NULL);
-  }
+  */
+
+  /*
   if (mergeBins == false) {
     for (int c=0; c < contigNames.size(); c++) {
       for (int b=0; b < copyNumber[c].size(); b++) {
@@ -1002,6 +1405,7 @@ int main(int argc, const char* argv[]) {
       }
     }
   }
+  */
   /*
 
   int state;
