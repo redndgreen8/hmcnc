@@ -1670,8 +1670,9 @@ void PrintHelp() {
 	 << "   -x value Max state to allow (10)" << endl
 	 << " -t value (int)     Number of threads (4) " << endl            
 	 << " -c contig          Use this contig to estimate coverage. By default, longest contig." << endl      
-	 << " Options controlling output:" << endl
+	 << " Options controlling output:" << endl      
          << " -o file            Output vcf to this file (stdout)." << endl
+         << " --Sample           use this sample name in the vcf (sample)" << endl
 	 << " -C contig          Only run hmm on this chrom." << endl
          << " -B bed             Write coverage bed to this file." << endl
          << " -P model           Write trained parameter file." << endl
