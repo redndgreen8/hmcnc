@@ -739,14 +739,16 @@ void WriteVCF(ostream &out,
       << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" << sampleName <<endl;
   for (int c=0; c < contigNames.size(); c++) {
     for (int i=0; i < intervals[c].size(); i++ ) {
-      out << contigNames[c] << "\t" << intervals[c][i].start
-	  << "." << "\t<CNV>\t<CNV>\t30\t" << intervals[c][i].filter << "\t"
-	  << "END=" << intervals[c][i].end
-	  << ";SVLEN=" << intervals[c][i].end - intervals[c][i].start
-	  << ";IMPRECISE\t"
-	  << "GT=" << intervals[c][i].copyNumber
-	  << ";PP=" << intervals[c][i].pVal
-	  << ";DP=" << intervals[c][i].averageCoverage << endl;
+      if (intervals[c][i].copyNumber != 2) {
+	out << contigNames[c] << "\t" << intervals[c][i].start
+	    << "\t.\t<CNV>\t<CNV>\t30\t" << intervals[c][i].filter << "\t"
+	    << "END=" << intervals[c][i].end
+	    << ";SVLEN=" << intervals[c][i].end - intervals[c][i].start
+	    << ";IMPRECISE\t"
+	    << "GT=" << intervals[c][i].copyNumber
+	    << ";PP=" << intervals[c][i].pVal
+	    << ";DP=" << intervals[c][i].averageCoverage << endl;
+      }
     }
   }
 }
