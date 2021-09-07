@@ -230,9 +230,8 @@ void WriteCovBed(string &covFileName,
   }
 }
 
-static void printModel(vector<vector<double> > &transP)
+static void printModel(vector<vector<double> > &transP, ostream *strm)
 {
-  ostream* strm =&cout;
   *strm << "\nTRANS: \n";
   for (int r=0;r<transP.size();r++)
     {
@@ -653,8 +652,8 @@ double BaumWelchEOnChrom(vector<double> &startP,
       }
     }
   }
-  cout << "Model " << endl;
-  printModel(expCovCovTransP);
+  cerr << "Model " << endl;
+  printModel(expCovCovTransP, &cerr);
   return px;
   
 }
@@ -731,7 +730,8 @@ void WriteVCF(ostream &out,
 
   out  << "##INFO=<ID=SVTYPE,Number=1,Type=String,Description=\"Type of structural variant\">" << endl
        << "##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position of the structural variant described in this record\">" << endl
-       << "##INFO=<ID=SVLEN,Number=.,Type=Integer,Description=\"Difference in length between REF and ALT alleles\">" << endl
+       << "##INFO=<ID=SVLEN,Number=1,Type=Integer,Description=\"Length of CNV\">" << endl
+       << "##INFO=<ID=REGION,Number=1,Type=String,Description=\"String of region for easy copy.\">" << endl    
        << "##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description=\"Imprecise structural variation\">" << endl;
   out << "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"CopyNumber\">" << endl
       << "##FORMAT=<ID=PP,Number=R,Type=Float,Description=\"Relative posterior probability (phred)\">" << endl
@@ -744,6 +744,7 @@ void WriteVCF(ostream &out,
 	    << "\t.\t<CNV>\t<CNV>\t30\t" << intervals[c][i].filter << "\t"
 	    << "END=" << intervals[c][i].end
 	    << ";SVLEN=" << intervals[c][i].end - intervals[c][i].start
+	    << ";REGION=" << contigNames[c] << ":" << intervals[c][i].start << "-" << intervals[c][i].end
 	    << ";IMPRECISE\t"
 	    << "GT=" << intervals[c][i].copyNumber
 	    << ";PP=" << intervals[c][i].pVal
@@ -1351,7 +1352,7 @@ int EstimateCoverage(string &bamFileName, vector<vector<int> > &allCovBins, vect
     
     const htsFormat *fmt = hts_get_format(htsfp);
     if (fmt == NULL or (fmt->format != sam and fmt->format != bam)) {
-      cout << "Cannot determine format of input reads." << endl;
+      cerr << "Cannot determine format of input reads." << endl;
       exit(1);
     }
 
@@ -1659,7 +1660,7 @@ void InitParams(vector<vector<double> > &covCovTransP,
 }
 
 void PrintHelp() {
-    cout << "usage: hmmcnc reference.fa" << endl
+    cerr << "usage: hmmcnc reference.fa" << endl
          << "   -a alignments    Read alignments from this file and calculate depth on the fly." << endl
          << "   -b bed           Read depth bed from this file. Skip calculation of depth." << endl
          << "   -s snv-file      Read SNVs from this file (when not estimating from a BAM)" << endl
@@ -1754,7 +1755,7 @@ int main(int argc, const char* argv[]) {
 	++argi;
 	lepsi=atof(argv[argi]);
       }
-      else if (strcmp(argv[argi], "-s") == 0) {
+      else if (strcmp(argv[argi], "--scale") == 0) {
 	++argi;
 	scale=atof(argv[argi]);
       }
@@ -2069,11 +2070,10 @@ int main(int argc, const char* argv[]) {
   int nSNVStates=3;
   double unif=log(1.0/nStates);
   if (paramInFile == "") {
-    cout << "Init params with mean " << mean << "\tvar:" << var << endl;
     InitParams(covCovTransP, covSnvTransP, snvSnvTransP,
 	       nStates, nSNVStates, log(1-exp(small)), log(exp(small)/(nStates-1)),
 	       emisP, model, maxCov, mean, var, binoP);
-    printModel(covCovTransP);
+    printModel(covCovTransP, &cerr);
     //    printEmissions(emisP);    
 
     //
@@ -2112,7 +2112,7 @@ int main(int argc, const char* argv[]) {
 	pthread_join(threads[procIndex], NULL);
       }
       px = pModel;
-      cout << "PMODEL " << pModel << endl;
+
       /*
 	pChrom = BaumWelchEOnChrom(startP,
 				   covCovTransP,
@@ -2128,8 +2128,7 @@ int main(int argc, const char* argv[]) {
 	PrintIntervals(contigNames[c], copyIntervals[c], cout);
 	}*/
       if (prevPX != 0 and px - prevPX < 100 and i > 1) {
-	cout << "Ending iteration after " << i << " steps" << endl;
-	
+	cerr << "Ending iteration after " << i << " steps" << endl;       
 	covCovTransP = prevTransP;
 	emisP  = prevEmisP;
 	break;
@@ -2146,7 +2145,7 @@ int main(int argc, const char* argv[]) {
 		 priorCovCov,
 		 updateTransP, updateEmisP);
       
-      printModel(updateTransP);
+      printModel(updateTransP, &cerr);
       covCovTransP=updateTransP;      
     }
 
