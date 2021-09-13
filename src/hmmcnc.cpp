@@ -733,21 +733,26 @@ void WriteVCF(ostream &out,
        << "##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position of the structural variant described in this record\">" << endl
        << "##INFO=<ID=SVLEN,Number=.,Type=Integer,Description=\"Difference in length between REF and ALT alleles\">" << endl
        << "##INFO=<ID=IMPRECISE,Number=0,Type=Flag,Description=\"Imprecise structural variation\">" << endl;
-  out << "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"CopyNumber\">" << endl
+  out << "##FORMAT=<ID=CN,Number=1,Type=String,Description=\"CopyNumber\">" << endl
       << "##FORMAT=<ID=PP,Number=R,Type=Float,Description=\"Relative posterior probability (phred)\">" << endl
       << "##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\"Read depth at this position for this sample\">" << endl
       << "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t" << sampleName <<endl;
   for (int c=0; c < contigNames.size(); c++) {
     for (int i=0; i < intervals[c].size(); i++ ) {
       if (intervals[c][i].copyNumber != 2) {
+
+        std::string cntype = (intervals[c][i].copyNumber > 2) ? "DUP" :  "DEL";
+        
 	out << contigNames[c] << "\t" << intervals[c][i].start
 	    << "\t.\t<CNV>\t<CNV>\t30\t" << intervals[c][i].filter << "\t"
-	    << "END=" << intervals[c][i].end
+            << "SVTYPE=" << cntype << ";"
+            << "END=" << intervals[c][i].end
 	    << ";SVLEN=" << intervals[c][i].end - intervals[c][i].start
 	    << ";IMPRECISE\t"
-	    << "GT=" << intervals[c][i].copyNumber
-	    << ";PP=" << intervals[c][i].pVal
-	    << ";DP=" << intervals[c][i].averageCoverage << endl;
+            << "CN:PP:DP\t"
+	    << intervals[c][i].copyNumber
+	    << ":" << intervals[c][i].pVal
+	    << ":" << intervals[c][i].averageCoverage << endl;
       }
     }
   }
