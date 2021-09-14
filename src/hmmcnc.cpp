@@ -86,7 +86,7 @@ double PairSumOfLogP(double a, double b) {
   return res;
 }
 
-double SumOfLogP(vector<double> &vals) {
+double SumOfLogP(const vector<double> &vals) {
   // Return zero for error.
   if (vals.size() == 0)
     return 0;
