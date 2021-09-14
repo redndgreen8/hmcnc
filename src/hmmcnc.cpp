@@ -87,17 +87,15 @@ double PairSumOfLogP(double a, double b) {
 }
 
 double SumOfLogP(vector<double> &vals) {
-  if (vals.size() == 0) {
-    // Return 0 for error.
+  // Return zero for error.
+  if (vals.size() == 0)
     return 0;
-  }
-  double maxVal = vals[0];
-  for (size_t i = 1; i < vals.size(); i++) {
-    maxVal = max(maxVal, vals[i]);
-  }
+
+  double maxVal = *std::max_element(vals.begin(), vals.end());
+
   double expSum = 0;
-  for (size_t i = 0; i < vals.size(); i++) {
-    expSum += exp(vals[i] - maxVal);
+  for (const auto &v : vals) {
+    expSum += exp(v - maxVal);
   }
   return maxVal + log(expSum);
 }
