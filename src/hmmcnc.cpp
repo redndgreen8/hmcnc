@@ -62,6 +62,7 @@ void Reset(vector<vector<double>> &vi) {
     fill(v.begin(), v.end(), 0);
   }
 }
+
 double oned = 1.0;
 double ONE = log(oned - 1e-10);
 double epsilon = 0.00000000001;
