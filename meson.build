@@ -1,6 +1,3 @@
-# meson build system for hmcnc
-# Author: Zev Kronenberg, Sept 10th, 2021
-
 project(
         'hmcnc',
         ['cpp', 'c'],
