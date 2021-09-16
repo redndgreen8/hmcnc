@@ -1972,7 +1972,7 @@ int main(int argc, const char* argv[]) {
   double var;
   int nStates;
   int maxCov;
-  vector<double> startP(nStates);
+  vector<double> startP;
   vector<vector<double> > covCovTransP, covSnvTransP, snvSnvTransP;
   vector<vector<double> > updateTransP;
   vector<vector<SNV> > snvs;
