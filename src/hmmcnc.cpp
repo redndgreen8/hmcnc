@@ -715,9 +715,10 @@ void StorePosteriorMaxIntervals(vector<int> &cov,
   int nSNV=0;
   double colSum;
   double avgPVal=0.0;
-  for (i=0; i < f[0].size(); i++) {
+  for (i=0; i < f[0].size()-1; i++) {
     double colMax=f[0][i] + b[0][i];
     int colMaxCN=0;
+    assert(i < cov.size());
     totCov+=cov[i];
     colSum=f[0][i] + b[0][i];
     for (int j = 1; j < f.size(); j++) {
@@ -1048,9 +1049,14 @@ int StoreSNVs(char *contigSeq,
     mean=((double)total)/contigLength;
   }
   for (int i =0; i < contigLength; i++) {
+    int tot=0;
     for (int n=0; n < 5; n++) {
       counts[n].index=n;
       counts[n].count = fPtr[n][i];
+      tot+=fPtr[n][i];
+    }
+    if (tot == 0) {
+      continue;
     }
     sort(counts.begin(), counts.end());
     char refNuc=toupper(contigSeq[i]);
