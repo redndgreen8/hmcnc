@@ -75,13 +75,15 @@ void Reset(vector<vector<double> > &v) {
     fill(v[i].begin(), v[i].end(), 0);
   }
 }
-double oned=1.0;
-double ONE=log(oned-1e-10);
-double epsilon=0.00000000001;
-double PairSumOfLogP(double a, double  b) {
-  double res=b;
-  if (a!= 0) {
-    double m = max(a,b);
+
+double oned = 1.0;
+double ONE = log(oned - 1e-10);
+double epsilon = 0.00000000001;
+double PairSumOfLogP(double a, double b) {
+  double res = b;
+  if (a != 0) {
+    double m = max(a, b);
+
     assert(a <= 0);
     double diff = min(a,b) - m;
     double e = exp(diff);
