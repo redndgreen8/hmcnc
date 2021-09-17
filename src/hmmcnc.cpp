@@ -2327,10 +2327,17 @@ int main(int argc, const char* argv[]) {
 	  alt=snvs[c][cni].alt;
 	  if (ref+alt >= maxCov) {
 	    alt=(int)(((float)maxCov)/(ref+alt) * alt);
-	    ref=maxCov-ref-1;
+	    ref=(int)(((float)maxCov)/(ref+alt) * ref);
 	  }
-	  pCN += binoP[curCN-1][ref+alt][alt];
-	  pCN2 += binoP[1][ref+alt][alt];
+	  int totCov=ref+alt;
+	  if (totCov >= maxCov) {
+	    totCov = maxCov-1;
+	  }
+	  if (alt >= maxCov) {
+	    alt = maxCov-1;
+	  }
+	  pCN += binoP[curCN-1][totCov][alt];
+	  pCN2 += binoP[1][totCov][alt];
 	}
 	if (pCN < pCN2) {
 	  copyIntervals[c][i].filter = "FAIL";
