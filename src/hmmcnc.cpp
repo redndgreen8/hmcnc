@@ -1064,7 +1064,8 @@ int StoreSNVs(char *contigSeq,
 	counts[3].index != 4 and
 	refNuc != 'N' and
 	counts[3].count > 0.25*mean and
-	counts[4].count > 0.25*mean )  {
+	counts[4].count > 0.25*mean and
+	counts[3].count < 2*mean )  {
       //
       // Top most frequent are not a deletion.
       //
@@ -1074,7 +1075,9 @@ int StoreSNVs(char *contigSeq,
       else if (nucs[counts[3].index] == refNuc) {
 	snvs.push_back(SNV(i, refNuc, nucs[counts[4].index], counts[4].count, counts[3].count));
       }
-
+      if (snvs.size() % 100000 == 0) {
+	cerr << "Stored " << snvs.size() << " at " << i << endl;
+      }      
     }
   }
   return 1;
@@ -1321,7 +1324,8 @@ void ParseChrom(ThreadInfo *threadInfo) {
 	if (backClipLen > MIN_CLIP_LENGTH) {
 	  int bin=endpos/BIN_LENGTH;
 	  (*threadInfo->clipBins)[curSeq][bin] += 1;	  	  
-	}	  
+	}
+	bam_destroy1(b);
       }
     }
     // Never compute in the last bin
