@@ -36,7 +36,7 @@ https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environme
 - snakemake
 - boost
 - R 
-- gcc
+- gxx
 - tabix
 
 `conda create --name <proj_env> bedtools samtools snakemake boost R tabix`
