@@ -131,31 +131,47 @@ and select the production default for `--epsi-weight`.
 
 ---
 
-## Phase 2: Directional Clipping (P_L, P_R)
+## Phase 2: Directional Clipping (P_L, P_R) [COMPLETED]
 
 ### Concept
 Separate left-clips and right-clips per bin:
-- **Left clips (P_L)**: Reads clipped on left side → deletion START, duplication END
-- **Right clips (P_R)**: Reads clipped on right side → deletion END, duplication START
+- **Left clips (P_L)**: frontClip (S at CIGAR start, counted at `startpos`) → deletion START, duplication END
+- **Right clips (P_R)**: backClip (S at CIGAR end, counted at `endpos`) → deletion END, duplication START
 
 ### Expected Patterns
 | State Transition | Expected Clips |
 |-----------------|----------------|
-| Normal → Deletion | High P_L |
-| Deletion → Normal | High P_R |
-| Normal → Duplication | High P_R |
-| Duplication → Normal | High P_L |
+| Normal → Deletion (2→1) | High P_L |
+| Deletion → Normal (1→2) | High P_R |
+| Normal → Duplication (2→3) | High P_R |
+| Duplication → Normal (3→2) | High P_L |
 
-### Implementation Tasks
-- [ ] Modify clip counting in BAM processing to separate L/R
-- [ ] Add `leftClipBins`, `rightClipBins` vectors
-- [ ] Separate ZINB parameters for each direction
-- [ ] Update clip bed I/O format
+### Implementation
 
-### Files to Modify
-- `src/hmmcnc.cpp` - Separate clip counting
-- `src/hmcnc_io.cpp` - Directional clip I/O
-- `include/hmcnc.h` - Data structure updates
+**BAM processing**: `ParseChrom` routes `frontClipLen > MIN_CLIP_LENGTH` into `leftClipBins`
+and `backClipLen > MIN_CLIP_LENGTH` into `rightClipBins`. Combined `clipBins` still populated
+for backward-compat HMM logic (unchanged from Phase 1.1).
+
+**ZINB parameters**: separate MOM estimation for L and R clips via `estimateZINB` lambda.
+Logged to stderr as `Left clip — mean/pi/phi` and `Right clip — mean/pi/phi`.
+
+**Directional posteriors**: `PnL/PclL/PnR/PclR` computed per-bin per-contig using L/R ZINB
+params. Stored for Phase 4 transition modification — not yet wired into HMM.
+
+**Clip bed format** (7 columns): `chr  start  end  leftClips  rightClips  Pn  Pcl`
+
+**Call counts** (identical to Phase 1.1 — HMM logic unchanged):
+
+| Sample | DEL | DUP | Total |
+|--------|-----|-----|-------|
+| HG002  | 175 | 353 | 528   |
+| HG003  | 160 | 305 | 465   |
+| HG004  | 182 | 322 | 504   |
+
+**Files modified:**
+- `src/hmmcnc.cpp` — `ThreadInfo` L/R pointers, `ParseChrom` routing, allocation, thread wiring, `estimateZINB` lambda, `PnL/PclL/PnR/PclR` computation
+- `src/hmcnc_io.cpp` — `WriteClipBed` updated to write L/R columns
+- `include/hmcnc.h` — `WriteClipBed` declaration updated
 
 ---
 

@@ -266,6 +266,8 @@ public:
   vector<int> procChroms;
   vector<vector<int>> *covBins;
   vector<vector<int>> *clipBins;
+  vector<vector<int>> *leftClipBins;
+  vector<vector<int>> *rightClipBins;
   vector<vector<double>> *cl,*n;
 
   vector<vector<SNV>> *snvs;
@@ -1658,11 +1660,13 @@ void ParseChrom(ThreadInfo *threadInfo) {
         if (frontClipLen > MIN_CLIP_LENGTH) {
           const int bin=startpos/BIN_LENGTH;
           (*threadInfo->clipBins)[curSeq][bin] += 1;
+          (*threadInfo->leftClipBins)[curSeq][bin] += 1;
         }
 
         if (backClipLen > MIN_CLIP_LENGTH) {
           const int bin=endpos/BIN_LENGTH;
           (*threadInfo->clipBins)[curSeq][bin] += 1;
+          (*threadInfo->rightClipBins)[curSeq][bin] += 1;
         }
 
         b.reset(nullptr);
@@ -1960,12 +1964,13 @@ int EstimateCoverage(const string &bamFileName,
 
 
 void InitParams(vector<vector<double>> &covCovTransP,
-                vector<vector<double>> &clipCovCovTransP,                
+                vector<vector<double>> &clipCovCovTransP,
                 vector<vector<double>> &covSnvTransP,
                 vector<vector<double>> &snvSnvTransP,
                 int nCovStates, int nSNVStates,
                 double diag, double offDiag,
-                double beta, double clipBeta, double epsi12, double epsi23,
+                double beta, double beta1, double clipBeta,
+                double epsiWeight,
                 vector<vector<double>> &emisP,
                 int model, int maxCov, double mean, double var,
                 vector<vector<vector<double>>> &binoP)
@@ -1973,90 +1978,50 @@ void InitParams(vector<vector<double>> &covCovTransP,
   covCovTransP.resize(nCovStates);
   clipCovCovTransP.resize(nCovStates);
 
-  const double Diag1 = log(  1 -  (  exp(beta)   * (nCovStates-3)) + exp(epsi23) + exp(epsi12)  );
+  // From CN=2: CN=1 exit uses beta1 (NB-based CN=1 threshold, more negative),
+  //            CN=3 and all other exits use beta (NB-based CN=3 threshold, less negative).
+  // beta > beta1 by ~20 nats, compensating for CN=3's wider NB distribution.
+  const double Diag1 = log(1 - exp(beta1) - exp(beta)*(nCovStates-2));
 
-  const double Diag2 = log(  (1 -  (  exp(beta)   * (nCovStates-2)) /2)) ;
-
-  const double Diag0 = log(  1 -  (  exp(beta)   * (nCovStates-2)) +  exp(epsi12)  );
-
-  const double clDiag1 = log(  1 -  (  exp(clipBeta)   * (nCovStates-3)) + exp(epsi23) + exp(epsi12)  );
-
-  const double clDiag2 = log(  (1 -  (  exp(clipBeta)   * (nCovStates-2)) /2)) ;
-  
-  const double clDiag0 = log(  1 -  (  exp(clipBeta)   * (nCovStates-2)) +  exp(epsi12)  );
-
-  const double neutralScaler =  0 - log(6) ;
-
-  const double stayScaler = neutralScaler + log(5);
-
-  const double unif = log(1.0/nCovStates);
-
-  const double large = -30;
-  
-  const double offDiagE = log(exp(large)/(nCovStates-1));
-
-  const double DiagE = log(1- exp(large));// + log (nCovStates-1)) );
-  
-  //offDiag = unif;
-
-  //diag = unif;
+  // From all other CN states: all exits use beta uniformly.
+  const double Diag2 = log(1 - exp(beta)*(nCovStates-1));
 
   for (int i=0;i<nCovStates;i++) {
     covCovTransP[i].resize(nCovStates);
     clipCovCovTransP[i].resize(nCovStates);
     for (int j=0;j<nCovStates;j++) {
-      if (i==0)
-      {//leaving del state
+      if (i==2)
+      {//leaving neutral state — asymmetric: CN=1 harder to call than CN=3
         if (i==j){
-          covCovTransP[i][j] = DiagE;// - log(2) ;// Diag0 - log(2);
-          clipCovCovTransP[i][j] = diag ;//- log(2) ; //clDiag0 - log(2);
+          covCovTransP[i][j] = Diag1;
+          clipCovCovTransP[i][j] = diag;
         }
-        else if(j==1){
-          covCovTransP[i][j] = offDiagE ;// epsi12;
-          clipCovCovTransP[i][j] = offDiag ; //epsi12;
-        }
-        else if(j==2){
-          covCovTransP[i][j] = offDiagE;// - log(2);////Diag0 - log(2);
-          clipCovCovTransP[i][j] =  offDiag ;//- log(2) ;//clDiag0 - log(2);
-        }
-        else{
-          covCovTransP[i][j] = offDiagE ;// //beta;
-          clipCovCovTransP[i][j] =  offDiag ;//clipBeta;
-        }
-      }
-
-      else if(i==2)
-      {//leaving neutral state
-        if(i==j){
-          covCovTransP[i][j] = DiagE;// -9.9999999999999994e-10;// DiagE ;//Diag1;
-          clipCovCovTransP[i][j] =  diag ;//clDiag1;
-        }
-        else if(j==1){
-          covCovTransP[i][j] = offDiagE;////epsi12;
-          clipCovCovTransP[i][j] = offDiag ;//epsi12;
+        else if (j==1){
+          covCovTransP[i][j] = beta1;
+          clipCovCovTransP[i][j] = offDiag;
         }
         else if (j==3){
-          covCovTransP[i][j] = offDiagE;////epsi23;
-          clipCovCovTransP[i][j] = offDiag ;//epsi23;
+          covCovTransP[i][j] = beta;
+          clipCovCovTransP[i][j] = offDiag;
         }
         else{
-          covCovTransP[i][j] = offDiagE ;////beta; 
-          clipCovCovTransP[i][j] =  offDiag;//clipBeta; 
+          covCovTransP[i][j] = beta;
+          clipCovCovTransP[i][j] = offDiag;
         }
       }
       else
-      {
-        if(i==j){ 
-          covCovTransP[i][j] = DiagE;// - log(2); //Diag2;
-          clipCovCovTransP[i][j] =  diag ;//- log(2);//clDiag2; 
+      {//leaving non-neutral state — symmetric exits, preferential return toward CN=2
+        if (i==j){
+          covCovTransP[i][j] = Diag2;
+          clipCovCovTransP[i][j] = diag;
         }
-        else if(j==2){
-          covCovTransP[i][j] = offDiagE ;//- log(2);////Diag2;
-          clipCovCovTransP[i][j] =  offDiag;// - log(2) ;//clDiag2;
+        else if (j==2){
+          covCovTransP[i][j] = beta;
+          clipCovCovTransP[i][j] = offDiag;
         }
         else{
-          covCovTransP[i][j] = offDiagE ;////beta;
-          clipCovCovTransP[i][j] =  offDiag ;//clipBeta;
+          covCovTransP[i][j] = beta;
+          clipCovCovTransP[i][j] = offDiag;
         }
       }
     }
@@ -2094,15 +2059,31 @@ void InitParams(vector<vector<double>> &covCovTransP,
   emisP.resize(nCovStates);
   for (int i=0;i<nCovStates;i++) {
     emisP[i].resize(maxCov+1);
-    double stateSum=0;
     for (int j=0;j<=maxCov;j++) {
       if (model == POIS) {
         emisP[i][j]=LgPrpoiss( (int) i , j , (int) mean/2 );
-        stateSum+=exp(LgPrpoiss( (int) i , j , (int) mean/2 ));
       }
       else  {
         emisP[i][j]=LgNegBinom((int)i, (int) j, mean/2, var/2);
-        stateSum+=exp(LgNegBinom((int)i, (int) j, mean/2, var/2));
+      }
+    }
+  }
+
+  // Apply per-bin epsi penalty to non-diploid emissions (scaled by epsiWeight).
+  // Per-bin penalty = (beta_dir / 100) * epsiWeight, where beta_dir is the
+  // NB LLR across 100 boundary bins in each direction.
+  // epsiWeight=1.0: full penalty (100-bin equivalent); 0.5: 200-bin; 0.0: disabled.
+  if (epsiWeight != 0.0) {
+    const double epsi_del = (beta1 / 100.0) * epsiWeight;
+    const double epsi_dup = (beta  / 100.0) * epsiWeight;
+    for (int i=0; i<nCovStates; i++) {
+      double offset = 0;
+      if      (i < 2) offset = epsi_del * (2 - i);
+      else if (i > 2) offset = epsi_dup * (i - 2);
+      if (offset != 0) {
+        for (int j=0; j<=maxCov; j++) {
+          emisP[i][j] += offset;
+        }
       }
     }
   }
@@ -2209,6 +2190,12 @@ Parameters::Parameters()
   const std::string depthGroupName{"Depth Calculation"};
   CLI.add_option("-e",lepsi,
     "Value of log-epsilon. [-800]")->
+    group(depthGroupName);
+
+  CLI.add_option("--epsi-weight", epsiWeight,
+    "Emission penalty weight for non-diploid states [1.0]. "
+    "Fraction of per-bin NB LLR penalty applied at each bin: "
+    "1.0 = full (100-bin equivalent), 0.5 = half, 0.0 = disabled.")->
     group(depthGroupName);
 
   CLI.add_option("-m", modelString,
@@ -2372,7 +2359,7 @@ int hmcnc(Parameters& params) {
   */
 
   vector<vector<int>> covBins, origCovBins;
-  vector<vector<int>> clipBins;
+  vector<vector<int>> clipBins, leftClipBins, rightClipBins;
   double mean;
   double var;
   double clipMean = -1;
@@ -2460,7 +2447,7 @@ int hmcnc(Parameters& params) {
   delT.resize(contigNames.size());
 
   
-  vector<vector<double>> Pcl, Pn;
+  vector<vector<double>> Pcl, Pn, PclL, PnL, PclR, PnR;
 
   Pn.resize(contigNames.size());
   Pcl.resize(contigNames.size());
@@ -2510,6 +2497,8 @@ int hmcnc(Parameters& params) {
     threadInfo[procIndex].contigLengths = &contigLengths;
     threadInfo[procIndex].covBins = &covBins;
     threadInfo[procIndex].clipBins = &clipBins;
+    threadInfo[procIndex].leftClipBins = &leftClipBins;
+    threadInfo[procIndex].rightClipBins = &rightClipBins;
     threadInfo[procIndex].copyNumber = &copyNumber;
     threadInfo[procIndex].snvs = &snvs;
     threadInfo[procIndex].lepsi = lepsi;
@@ -2566,11 +2555,14 @@ int hmcnc(Parameters& params) {
 
   if (params.clipInFileName == "") {
     clipBins.resize(contigLengths.size());
+    leftClipBins.resize(contigLengths.size());
+    rightClipBins.resize(contigLengths.size());
     for (size_t c=0; c < contigLengths.size(); c++ ) {
       clipBins[c].resize(contigLengths[c]/BIN_LENGTH);
+      leftClipBins[c].resize(contigLengths[c]/BIN_LENGTH);
+      rightClipBins[c].resize(contigLengths[c]/BIN_LENGTH);
       Pn[c].resize(contigLengths[c]/BIN_LENGTH);
       Pcl[c].resize(contigLengths[c]/BIN_LENGTH);
-
     }
   }
   if (params.covBedInFileName == "") {
@@ -2578,6 +2570,8 @@ int hmcnc(Parameters& params) {
     for (size_t c=0; c < contigLengths.size(); c++ ) {
       covBins[c].resize(contigLengths[c]/BIN_LENGTH);
       clipBins[c].resize(contigLengths[c]/BIN_LENGTH);
+      leftClipBins[c].resize(contigLengths[c]/BIN_LENGTH);
+      rightClipBins[c].resize(contigLengths[c]/BIN_LENGTH);
       copyNumber[c].resize(contigLengths[c]/BIN_LENGTH);
     }
 
@@ -2616,7 +2610,7 @@ int hmcnc(Parameters& params) {
       WriteCovBed(params.covBedOutFileName, contigNames, covBins);
     }
     if (params.clipOutFileName != "") {
-      WriteClipBed(params.clipOutFileName, contigNames, clipBins, Pn, Pcl);
+      WriteClipBed(params.clipOutFileName, contigNames, leftClipBins, rightClipBins, Pn, Pcl);
     }
     if (params.snvOutFileName != "") {
       WriteSNVs(params.snvOutFileName, contigNames, snvs);
@@ -2737,6 +2731,41 @@ int hmcnc(Parameters& params) {
   }
   cerr<<"Clip Pi: "<<clipPi<<"\nClip Phi: "<<clipPhi<<endl;
 
+  // Compute directional (left/right) ZINB parameters
+  auto estimateZINB = [&](const vector<vector<int>> &bins,
+                           double &dmean, double &dvar, double &dpi, double &dphi) {
+    double dsum = 0;
+    vector<int> dcounts;
+    for (size_t c = 0; c < bins.size(); c++) {
+      for (int v : bins[c]) {
+        if (v > 0) { dsum += v; dcounts.push_back(v); }
+      }
+    }
+    if (dcounts.size() > 1) {
+      dmean = dsum / dcounts.size();
+      dvar = 0;
+      for (int v : dcounts) dvar += (v - dmean) * (v - dmean);
+      dvar /= (dcounts.size() - 1);
+    } else {
+      dmean = 1; dvar = 3;
+    }
+    double phi_e = (dvar > dmean && dmean > 0) ? dmean*dmean/(dvar - dmean) : dmean;
+    phi_e = max(0.1, phi_e);
+    double p_nb = phi_e / (dmean + phi_e);
+    double prob_nb0 = pow(p_nb, phi_e);
+    double frac0 = (n_total_bins > 0) ? 1.0 - (double)dcounts.size() / (double)n_total_bins : 0.9;
+    double pi_e = (1.0 - prob_nb0 > 1e-9) ? (frac0 - prob_nb0) / (1.0 - prob_nb0) : 0.0;
+    dpi  = max(0.0, min(0.999, pi_e));
+    dphi = phi_e;
+  };
+
+  double clipMeanL, clipVarL, clipPiL, clipPhiL;
+  double clipMeanR, clipVarR, clipPiR, clipPhiR;
+  estimateZINB(leftClipBins,  clipMeanL, clipVarL, clipPiL, clipPhiL);
+  estimateZINB(rightClipBins, clipMeanR, clipVarR, clipPiR, clipPhiR);
+  cerr << "Left clip  — mean: " << clipMeanL << "  pi: " << clipPiL << "  phi: " << clipPhiL << endl;
+  cerr << "Right clip — mean: " << clipMeanR << "  pi: " << clipPiR << "  phi: " << clipPhiR << endl;
+
   // Stats-only mode: output stats and exit
   if (params.statsOnly) {
     cerr << "\n=== STATS-ONLY MODE ===" << endl;
@@ -2806,13 +2835,34 @@ int hmcnc(Parameters& params) {
     }
   }
 
-/*
-  for (auto c=0 ;c < contigNames.size(); c++) {
-    for (int i=0;i<Pcl[c].size();i++){
-    std:cout<<Pn[c][i]<<"\t"<<Pcl[c][i]<<endl;
+  // Directional posteriors (used in Phase 4 transition modification)
+  double pi_clippedL = max(0.0, clipPiL - 0.3);
+  double pi_clippedR = max(0.0, clipPiR - 0.3);
+  double clipHmeanL  = clipMeanL * 2;
+  double clipHmeanR  = clipMeanR * 2;
+
+  PnL.resize(contigNames.size()); PclL.resize(contigNames.size());
+  PnR.resize(contigNames.size()); PclR.resize(contigNames.size());
+  for (auto c=0; c < (int)contigNames.size(); c++) {
+    const int nbins = leftClipBins[c].size();
+    PnL[c].resize(nbins); PclL[c].resize(nbins);
+    PnR[c].resize(nbins); PclR[c].resize(nbins);
+    for (int b=0; b < nbins; b++) {
+      int lc = min(clipMax, leftClipBins[c][b]);
+      double PnL_raw  = LgZINB(lc, clipPiL,    clipMeanL,  clipPhiL) + PNeutral;
+      double PclL_raw = LgZINB(lc, pi_clippedL, clipHmeanL, clipPhiL) + PClipped;
+      double denomL   = PairSumOfLogP(PnL_raw, PclL_raw);
+      PnL[c][b]  = PnL_raw  - denomL;
+      PclL[c][b] = PclL_raw - denomL;
+
+      int rc = min(clipMax, rightClipBins[c][b]);
+      double PnR_raw  = LgZINB(rc, clipPiR,    clipMeanR,  clipPhiR) + PNeutral;
+      double PclR_raw = LgZINB(rc, pi_clippedR, clipHmeanR, clipPhiR) + PClipped;
+      double denomR   = PairSumOfLogP(PnR_raw, PclR_raw);
+      PnR[c][b]  = PnR_raw  - denomR;
+      PclR[c][b] = PclR_raw - denomR;
     }
   }
-*/
 
 
 
@@ -3013,15 +3063,18 @@ int hmcnc(Parameters& params) {
 
 
 
-  const double beta_new = 100 * lepsi23_nb;
-
-  const double clipBeta = 100 * lepsi23_nb;
-
+  // Transition thresholds: 100 bins of NB boundary evidence in each direction.
+  // beta  (CN=3 direction): less negative — CN=3 has wider NB var, weaker per-bin signal
+  // beta1 (CN=1 direction): more negative — CN=1 has narrower NB var, stronger per-bin signal
+  // Using beta for CN=3 exits and beta1 for CN=1 exits from CN=2 calibrates both
+  // directions to require ~100 boundary-level bins, compensating for the asymmetry.
+  const double beta_new  = 100 * lepsi23_nb;
+  const double beta1_new = 100 * lepsi21_nb;
+  const double clipBeta  = 100 * lepsi23_nb;
 
   std::cerr<<"negBin lepsi23: "<<lepsi23_nb<<"\nnegBin lepsi21: "<<lepsi21_nb<<std::endl;
   std::cerr<<"poisson lepsi23: "<<epsi23<<"\npoisson lepsi21: "<<epsi12<<endl;
-
-  std::cerr<<"Using neutral beta: "<<beta_new<<std::endl;
+  std::cerr<<"Using beta (CN=3 dir): "<<beta_new<<"\nUsing beta1 (CN=1 dir): "<<beta1_new<<std::endl;
   std::cerr<<"Using clipped beta: "<<clipBeta<<std::endl;
 
 
@@ -3033,10 +3086,11 @@ int hmcnc(Parameters& params) {
 
   if (params.paramInFile == "") {
     InitParams(covCovTransP, clipCovCovTransP, covSnvTransP, snvSnvTransP,
-	       nStates, nSNVStates, 
-         log(1-exp(small)), log(exp(small)/(nStates-1)),
-         beta_new, clipBeta, 100*epsi12 , 100*epsi23,
-	       emisP, params.model, maxCov, mean, var, binoP);
+               nStates, nSNVStates,
+               log(1-exp(small)), log(exp(small)/(nStates-1)),
+               beta_new, beta1_new, clipBeta,
+               params.epsiWeight,
+               emisP, params.model, maxCov, mean, var, binoP);
     
     cerr<<"\nNeutral"<<endl;
     printModel(covCovTransP, &cerr);
