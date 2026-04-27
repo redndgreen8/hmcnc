@@ -60,6 +60,7 @@ struct Parameters {
   std::string clipInFileName;
   std::string clipOutFileName;
   std::string outFileName;
+  std::string outputPrefix;  // --output-all: prefix for all output files
   std::string useChrom;
   std::string hmmChrom;
 
@@ -67,6 +68,13 @@ struct Parameters {
   MODEL_TYPE model = NEG_BINOM;
   bool mergeBins=false;
   std::string sampleName;
+
+  // Whole-genome stats overrides (for single-chrom testing)
+  double wgMean = -1;       // -1 means estimate from data
+  double wgVar = -1;
+  double wgClipMean = -1;
+  double wgClipVar = -1;
+  bool statsOnly = false;   // If true, compute stats and exit
 
   CLI::App CLI;
   std::string modelString;
@@ -140,6 +148,8 @@ double LgNegBinom(int cn, int cov, float Hmean, float Hvar);
 
 double LgPrpoiss(int cn,  int cov, int Hmean);
 
+double LgZINB(int count, double pi, double mu, double phi);
+
 void Moments(const std::vector<double> &v, double &ex, double &var);
 
 double PairSumOfLogP(double a, double b);
@@ -195,12 +205,16 @@ void ReadFai(const std::string faiFileName,
              std::vector<int> &contigLengths);
 
 void ReadParameterFile(std::istream &file, int &nStates, double &covMean,
-                       double &covVar, int &maxState, int &maxCov,
+                       double &covVar, double &clipMean, double &clipVar,
+                       double &clipPi, double &clipPhi,
+                       int &maxState, int &maxCov,
                        std::vector<double> &startP,
                        std::vector<std::vector<double>> &transP, std::vector<std::vector<double>> &clipTransP,
                        std::vector<std::vector<double>> &emisP);
 void ReadParameterFile(const std::string &fileName, int &nStates, double &covMean,
-                       double &covVar, int &maxState, int &maxCov,
+                       double &covVar, double &clipMean, double &clipVar,
+                       double &clipPi, double &clipPhi,
+                       int &maxState, int &maxCov,
                        std::vector<double> &startP,
                        std::vector<std::vector<double>> &transP, std::vector<std::vector<double>> &clipTransP,
                        std::vector<std::vector<double>> &emisP);
@@ -229,12 +243,16 @@ void WriteClipBed(const std::string &covFileName,
                 const std::vector<std::vector<double>> &Pn, const std::vector<std::vector<double>> &Pcl);
 
 void WriteParameterFile(std::ostream &file, int nStates, double covMean,
-                        double covVar, int maxState, int maxCov,
+                        double covVar, double clipMean, double clipVar,
+                        double clipPi, double clipPhi,
+                        int maxState, int maxCov,
                         const std::vector<double> &startP,
                         const std::vector<std::vector<double>> &transP, std::vector<std::vector<double>> &clipTransP,
                         const std::vector<std::vector<double>> &emisP);
 void WriteParameterFile(const std::string &fileName, int nStates, double covMean,
-                        double covVar, int maxState, int maxCov,
+                        double covVar, double clipMean, double clipVar,
+                        double clipPi, double clipPhi,
+                        int maxState, int maxCov,
                         const std::vector<double> &startP,
                         const std::vector<std::vector<double>> &transP, std::vector<std::vector<double>> &clipTransP,
                         const std::vector<std::vector<double>> &emisP);

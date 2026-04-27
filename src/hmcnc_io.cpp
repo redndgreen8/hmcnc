@@ -89,7 +89,9 @@ void ReadFai(const std::string faiFileName,
 }
 
 void ReadParameterFile(std::istream& inFile, int &nStates, double &covMean,
-                       double &covVar, int &maxState, int &maxCov,
+                       double &covVar, double &clipMean, double &clipVar,
+                       double &clipPi, double &clipPhi,
+                       int &maxState, int &maxCov,
                        std::vector<double> &startP,
                        std::vector<std::vector<double>> &transP, std::vector<std::vector<double>> &clipTransP,
                        std::vector<std::vector<double>> &emisP) {
@@ -103,6 +105,23 @@ void ReadParameterFile(std::istream& inFile, int &nStates, double &covMean,
   inFile >> spacer >> nStates;
   inFile >> spacer >> covMean;
   inFile >> spacer >> covVar;
+  inFile >> spacer >> clipMean;
+  inFile >> spacer >> clipVar;
+  // clipPi and clipPhi are optional (added in Phase 1); peek at next key
+  {
+    std::streampos pos = inFile.tellg();
+    std::string key;
+    inFile >> key;
+    if (key == "clipPi") {
+      inFile >> clipPi;
+      inFile >> key;  // should be "clipPhi"
+      inFile >> clipPhi;
+    } else {
+      clipPi  = -1;
+      clipPhi = -1;
+      inFile.seekg(pos);
+    }
+  }
   inFile >> spacer >> maxState;
   inFile >> spacer >> maxCov;
 
@@ -181,13 +200,15 @@ void ReadParameterFile(std::istream& inFile, int &nStates, double &covMean,
 }
 
 void ReadParameterFile(const std::string &fileName, int &nStates, double &covMean,
-                       double &covVar, int &maxState, int &maxCov,
+                       double &covVar, double &clipMean, double &clipVar,
+                       double &clipPi, double &clipPhi,
+                       int &maxState, int &maxCov,
                        std::vector<double> &startP,
                        std::vector<std::vector<double>> &transP, std::vector<std::vector<double>> &clipTransP,
                        std::vector<std::vector<double>> &emisP) {
   std::ifstream inFile{fileName.c_str()};
-  ReadParameterFile(inFile, nStates, covMean, covVar, maxState, maxCov,
-                    startP, transP, clipTransP, emisP);
+  ReadParameterFile(inFile, nStates, covMean, covVar, clipMean, clipVar, clipPi, clipPhi,
+                    maxState, maxCov, startP, transP, clipTransP, emisP);
 }
 
 void ReadSNVs(std::istream &snvIn,
@@ -275,7 +296,9 @@ void WriteClipBed(const std::string &covFileName,
 
 
 void WriteParameterFile(std::ostream &outFile, int nStates, double covMean,
-                        double covVar, int maxState, int maxCov,
+                        double covVar, double clipMean, double clipVar,
+                        double clipPi, double clipPhi,
+                        int maxState, int maxCov,
                         const std::vector<double> &startP,
                         const std::vector<std::vector<double>> &transP, std::vector<std::vector<double>> &clipTransP,
                         const std::vector<std::vector<double>> &emisP) {
@@ -285,6 +308,10 @@ void WriteParameterFile(std::ostream &outFile, int nStates, double covMean,
   outFile << "nStates\t" << nStates << '\n'
 	        << "covMean\t" << covMean << '\n'
 	        << "covVar\t" << covVar  << '\n'
+	        << "clipMean\t" << clipMean << '\n'
+	        << "clipVar\t" << clipVar << '\n'
+	        << "clipPi\t"  << clipPi  << '\n'
+	        << "clipPhi\t" << clipPhi << '\n'
 	        << "maxState\t" << maxState << '\n'
 	        << "maxCov\t" << maxCov << '\n';
 
@@ -351,13 +378,15 @@ void WriteParameterFile(std::ostream &outFile, int nStates, double covMean,
 }
 
 void WriteParameterFile(const std::string &fileName, int nStates, double covMean,
-                        double covVar, int maxState, int maxCov,
+                        double covVar, double clipMean, double clipVar,
+                        double clipPi, double clipPhi,
+                        int maxState, int maxCov,
                         const std::vector<double> &startP,
                         const std::vector<std::vector<double>> &transP, std::vector<std::vector<double>> &clipTransP,
                         const std::vector<std::vector<double>> &emisP) {
   std::ofstream outFile{fileName.c_str()};
-  WriteParameterFile(outFile, nStates, covMean, covVar, maxState, maxCov,
-                     startP, transP, clipTransP, emisP);
+  WriteParameterFile(outFile, nStates, covMean, covVar, clipMean, clipVar, clipPi, clipPhi,
+                     maxState, maxCov, startP, transP, clipTransP, emisP);
 }
 
 void WriteSNVs(std::ostream &snvOut,

@@ -377,6 +377,19 @@ double LgNegBinom(int cn, int cov, float Hmean, float Hvar) {
   return result;
 }
 
+double LgZINB(int count, double pi, double mu, double phi) {
+  // phi = NB size/dispersion, p_nb = phi/(mu+phi)
+  double p_nb = phi / (mu + phi);
+  double logNB0 = phi * log(p_nb);  // log P(NB=0)
+  if (count == 0) {
+    return PairSumOfLogP(log(pi), log(1.0 - pi) + logNB0);
+  }
+  const negative_binomial_distribution<double> nb(phi, p_nb);
+  double prob = pdf(nb, count);
+  if (prob <= 0) return lepsi;
+  return log(1.0 - pi) + log(prob);
+}
+
 double LgBinom(double p, int s, int n) {
   const binomial snv(n, p);
   const double pVal=pdf(snv,s);
@@ -2211,6 +2224,30 @@ Parameters::Parameters()
     group(depthGroupName);
 
   //
+  // Whole-genome stats overrides (for single-chrom testing)
+  //
+  const std::string statsGroupName{"Statistics Override"};
+  CLI.add_option("--wg-mean", wgMean,
+    "Use this as haploid mean coverage (skip estimation from data).")->
+    group(statsGroupName);
+
+  CLI.add_option("--wg-var", wgVar,
+    "Use this as coverage variance (skip estimation from data).")->
+    group(statsGroupName);
+
+  CLI.add_option("--wg-clip-mean", wgClipMean,
+    "Use this as mean clip count per bin (skip estimation from data).")->
+    group(statsGroupName);
+
+  CLI.add_option("--wg-clip-var", wgClipVar,
+    "Use this as clip variance (skip estimation from data).")->
+    group(statsGroupName);
+
+  CLI.add_flag("--stats-only", statsOnly,
+    "Compute and output statistics to stderr, then exit (no HMM run).")->
+    group(statsGroupName);
+
+  //
   // Output options
   //
   const std::string outputGroupName{"Output"};
@@ -2266,7 +2303,10 @@ Parameters::Parameters()
     group(outputGroupName)->
     type_name("FILE");
 
-
+  CLI.add_option("--output-all", outputPrefix,
+    "Output all files with this prefix (sets -o, -P, -B, -L, -S, --bed).")->
+    group(outputGroupName)->
+    type_name("PREFIX");
 
   //
   // Post-parsing sanity checks
@@ -2274,6 +2314,15 @@ Parameters::Parameters()
   CLI.callback([this]() {
     if (this->modelString == "pois") {
       this->model = POIS;
+    }
+    // Expand --output-all prefix to individual output files
+    if (this->outputPrefix != "") {
+      if (this->outFileName == "") this->outFileName = this->outputPrefix + ".vcf";
+      if (this->paramOutFile == "") this->paramOutFile = this->outputPrefix + ".param";
+      if (this->covBedOutFileName == "") this->covBedOutFileName = this->outputPrefix + ".cov.bed";
+      if (this->clipOutFileName == "") this->clipOutFileName = this->outputPrefix + ".clip.bed";
+      if (this->snvOutFileName == "") this->snvOutFileName = this->outputPrefix + ".snv";
+      if (this->outBedName == "") this->outBedName = this->outputPrefix + ".bed";
     }
     if (this->covBedInFileName != "" and this->covBedOutFileName != "") {
       cerr << "ERROR. Cannot specify -b and -B.\n";
@@ -2326,6 +2375,10 @@ int hmcnc(Parameters& params) {
   vector<vector<int>> clipBins;
   double mean;
   double var;
+  double clipMean = -1;
+  double clipVar = -1;
+  double clipPi  = -1;
+  double clipPhi = -1;
   int nStates;
   int maxCov;
   vector<double> startP;
@@ -2359,7 +2412,7 @@ int hmcnc(Parameters& params) {
 
   if (params.paramInFile != "") {
      ReadParameterFile(params.paramInFile, nStates,
-		       mean, var, maxState, maxCov,
+		       mean, var, clipMean, clipVar, clipPi, clipPhi, maxState, maxCov,
 		       startP, covCovTransP, clipCovCovTransP, emisP);
   }
 
@@ -2575,9 +2628,15 @@ int hmcnc(Parameters& params) {
 
   EstimateCoverage(params.bamFileName, covBins, allContigNames, allContigLengths, params.useChrom, mean, var);
 
-  //debug
-  //mean = 36;
-  //var = 100;
+  // Override with WG stats if provided via CLI or param file
+  if (params.wgMean > 0) {
+    cerr << "Using provided WG mean: " << params.wgMean << " (estimated: " << mean << ")" << endl;
+    mean = params.wgMean;
+  }
+  if (params.wgVar > 0) {
+    cerr << "Using provided WG var: " << params.wgVar << " (estimated: " << var << ")" << endl;
+    var = params.wgVar;
+  }
 
   if ((mean/var)>=0.90 and (mean/var)<=1.10){
     params.model= POIS;
@@ -2591,6 +2650,7 @@ int hmcnc(Parameters& params) {
 
   double clippingSum = 0;
   vector<int> clipCounts;
+  long n_total_bins = 0;
   for (auto c=0 ;c < contigNames.size(); c++) {
     if (chromCopyNumber[c] > 1.5 and chromCopyNumber[c] < 2.5) {
       NaiveCaller(covBins[c], UnmergedNaiveIntervals[c], mean );
@@ -2603,6 +2663,7 @@ int hmcnc(Parameters& params) {
       cerr << "Not using naive depth on " << contigNames[c] << " copy number " << chromCopyNumber[c] << endl;
     }
     for (int i=0; i < clipBins[c].size(); i++){
+      n_total_bins++;
       if (clipBins[c][i]>0){
         clippingSum+=clipBins[c][i];
         clipCounts.push_back(clipBins[c][i]);
@@ -2612,27 +2673,97 @@ int hmcnc(Parameters& params) {
 
 
 
-  double clipMean, clipVar;
   double clipHmean = mean/2;
   bool   useClip;
-  if (clipCounts.size() > 1) {    
-    clipMean = (clippingSum/clipCounts.size());
-    for (size_t i=0 ; i< clipCounts.size(); i++){
-      clipVar += (clipCounts[i] - clipMean) * (clipCounts[i] - clipMean);
-    }
-    clipVar=(clipVar/(clipCounts.size()-1));
-    useClip  = true;
-  }
-  else {
-    clipMean=1;
-    clipVar=3;
-    useClip=false;
-  }
-    
 
+  // Compute clip stats from data if not already set (from param file)
+  if (clipMean < 0 || clipVar < 0) {
+    if (clipCounts.size() > 1) {
+      clipMean = (clippingSum/clipCounts.size());
+      clipVar = 0;
+      for (size_t i=0 ; i< clipCounts.size(); i++){
+        clipVar += (clipCounts[i] - clipMean) * (clipCounts[i] - clipMean);
+      }
+      clipVar=(clipVar/(clipCounts.size()-1));
+      useClip  = true;
+    }
+    else {
+      clipMean=1;
+      clipVar=3;
+      useClip=false;
+    }
+  } else {
+    useClip = true;
+  }
+
+  // Override with WG clip stats if provided via CLI
+  if (params.wgClipMean > 0) {
+    cerr << "Using provided WG clip mean: " << params.wgClipMean << " (estimated: " << clipMean << ")" << endl;
+    clipMean = params.wgClipMean;
+    useClip = true;
+  }
+  if (params.wgClipVar > 0) {
+    cerr << "Using provided WG clip var: " << params.wgClipVar << " (estimated: " << clipVar << ")" << endl;
+    clipVar = params.wgClipVar;
+  }
 
   cerr<<"Clip Mean: "<<clipMean<<"\nClip Var: "<<clipVar<<"\nuseClip: "<<useClip<<endl;
   cerr<<"Cov Mean: "<<mean<<"\nCov Var: "<<var<<endl;
+
+  // Estimate ZINB parameters from clip data if not loaded from param file
+  if (clipPi < 0 || clipPhi < 0) {
+    // clipMean and clipVar are over non-zero clips; estimate NB dispersion via MOM
+    double phi_est = (clipVar > clipMean && clipMean > 0)
+                     ? clipMean * clipMean / (clipVar - clipMean)
+                     : clipMean;
+    phi_est = max(0.1, phi_est);
+
+    // P(NB = 0) under this fit
+    double p_nb  = phi_est / (clipMean + phi_est);
+    double prob_nb_zero = pow(p_nb, phi_est);
+
+    // Fraction of all bins that are zero
+    double frac_zeros = (n_total_bins > 0)
+                        ? 1.0 - (double)clipCounts.size() / (double)n_total_bins
+                        : 0.9;
+
+    double pi_est = (1.0 - prob_nb_zero > 1e-9)
+                    ? (frac_zeros - prob_nb_zero) / (1.0 - prob_nb_zero)
+                    : 0.0;
+    pi_est = max(0.0, min(0.999, pi_est));
+
+    clipPhi = phi_est;
+    clipPi  = pi_est;
+  }
+  cerr<<"Clip Pi: "<<clipPi<<"\nClip Phi: "<<clipPhi<<endl;
+
+  // Stats-only mode: output stats and exit
+  if (params.statsOnly) {
+    cerr << "\n=== STATS-ONLY MODE ===" << endl;
+    cerr << "Whole-genome statistics for use with single-chrom testing:" << endl;
+    cerr << "  --wg-mean " << mean << " --wg-var " << var;
+    cerr << " --wg-clip-mean " << clipMean << " --wg-clip-var " << clipVar << endl;
+    cerr << "\nThese values are also saved in parameter file if -P is specified." << endl;
+
+    // Write parameter file if requested
+    if (params.paramOutFile != "") {
+      // Need to initialize minimal params for writing
+      int statsNStates = 7;
+      int statsMaxState = 6;
+      int statsMaxCov = 500;
+      vector<double> statsStartP(statsNStates, log(1.0/statsNStates));
+      vector<vector<double>> statsTransP(statsNStates, vector<double>(statsNStates, log(0.01)));
+      vector<vector<double>> statsClipTransP(statsNStates, vector<double>(statsNStates, log(0.01)));
+      vector<vector<double>> statsEmisP(statsNStates, vector<double>(statsMaxCov, log(0.001)));
+
+      WriteParameterFile(params.paramOutFile, statsNStates, mean, var, clipMean, clipVar,
+                         clipPi, clipPhi,
+                         statsMaxState, statsMaxCov, statsStartP, statsTransP, statsClipTransP, statsEmisP);
+      cerr << "Stats written to: " << params.paramOutFile << endl;
+    }
+
+    return 0;
+  }
 
 
   //assert(clipMean*4<clipHmean);
@@ -2649,12 +2780,14 @@ int hmcnc(Parameters& params) {
   cerr<<"WG Pn: "<<PNeutral<<"\nWG Pcl: "<<PClipped<<"\nEst. ~100 clips in 10E7 bins"<<endl;
 
 
-  // 
-  // update to NegB
   //
-
-  poisson distributionClip(clipMean);
-  poisson distributionHClip(clipHmean);
+  // ZINB clip model: neutral = ZINB(clipPi, clipMean, clipPhi)
+  //                  clipped = ZINB(pi_low, clipHmean, clipPhi)
+  //
+  // "Clipped" state has lower zero-inflation and higher mean (breakpoint bins
+  // accumulate many clips). Same dispersion as neutral for now (Phase 1).
+  //
+  double pi_clipped = max(0.0, clipPi - 0.3);  // fewer zeros at breakpoints
 
   int clip_count;
   double Pneutral, Pclipped, denom;
@@ -2663,14 +2796,13 @@ int hmcnc(Parameters& params) {
     Pn[c].resize(clipBins[c].size());
     Pcl[c].resize(clipBins[c].size());
     for (auto b=0 ;b < clipBins[c].size(); b++) {
-        clip_count = min(clipMax , clipBins[c][b]); 
-        Pneutral = log(pdf(distributionClip, clip_count)) + PNeutral;
-        Pclipped = log(pdf(distributionHClip, clip_count)) + PClipped;
-        denom = PairSumOfLogP( Pneutral , Pclipped );
+        clip_count = min(clipMax , clipBins[c][b]);
+        Pneutral = LgZINB(clip_count, clipPi,      clipMean,  clipPhi) + PNeutral;
+        Pclipped = LgZINB(clip_count, pi_clipped,  clipHmean, clipPhi) + PClipped;
+        denom = PairSumOfLogP(Pneutral, Pclipped);
 
-      	Pn[c][b]  = Pneutral - denom;
-      	Pcl[c][b] = Pclipped - denom;
-
+        Pn[c][b]  = Pneutral - denom;
+        Pcl[c][b] = Pclipped - denom;
     }
   }
 
@@ -3003,7 +3135,7 @@ int hmcnc(Parameters& params) {
       if (params.paramOutFile != "") {
         string s = std::to_string(i);
         string outName = params.paramOutFile + "." + s;
-        WriteParameterFile( outName , nStates, mean, var, maxState, maxCov, startP, covCovTransP, clipCovCovTransP, emisP);
+        WriteParameterFile( outName , nStates, mean, var, clipMean, clipVar, clipPi, clipPhi, maxState, maxCov, startP, covCovTransP, clipCovCovTransP, emisP);
       }
 
 
