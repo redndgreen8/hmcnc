@@ -76,6 +76,11 @@ struct Parameters {
   double wgClipVar = -1;
   bool statsOnly = false;   // If true, compute stats and exit
 
+  // Emission penalty scale [0,1]: fraction of per-bin epsi penalty applied to
+  // non-diploid states.  1.0 = full penalty (100 bins of boundary evidence
+  // required); 0.5 = 200 bins; 0.0 = no penalty.
+  double epsiWeight = 1.0;
+
   CLI::App CLI;
   std::string modelString;
 

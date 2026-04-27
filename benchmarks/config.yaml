@@ -1,0 +1,33 @@
+# HMCNC Benchmarking Config
+# Copy and edit this file per-phase, or pass overrides on the command line.
+
+phase: "phase0"
+
+# Reference (must have .fai in same directory)
+ref: "/Users/red/repos/MethSmoothEval/data/annotations/hg38.chr22.fa"
+
+# Directory containing <SAMPLE>.chr22.truth.vcf.gz (+.tbi)
+# Download GIAB CNV truth sets and place here, or symlink.
+truth_dir: "benchmarks/truth"
+
+# BAM directory
+bam_dir: "data/chr22_test"
+
+# hmcnclip binary
+binary: "src/hmcnclip"
+
+# Samples to evaluate
+samples:
+  - HG002
+  - HG003
+  - HG004
+
+# Annotation files for filter_finalize_call.sh
+excl_bed:   "HMM/annotation/hg38.region_to_EXCLUDE.bed"
+repeat_bed: "HMM/annotation/hg38.repeatMask.merged.bed"
+filter_sh:  "HMM/filter_finalize_call.sh"
+
+# Extra CLI args to hmcnclip (empty = defaults)
+# Example for WG-stats override:
+#   extra_args: "--wg-mean 30 --wg-var 120 --wg-clip-mean 3 --wg-clip-var 50"
+extra_args: ""

@@ -79,6 +79,11 @@ Statistics Override:
   --wg-clip-var FLOAT   Clip variance
   --stats-only          Output stats and exit
 
+Depth Calculation:
+  --epsi-weight FLOAT   Emission penalty weight [1.0]. Per-bin NB LLR penalty
+                        applied to non-diploid states. 1.0 = 100-bin threshold,
+                        0.5 = 200-bin threshold, 0.0 = disabled.
+
 Output:
   -o FILE    VCF output
   -P FILE    Trained parameter file
@@ -148,23 +153,35 @@ meson test -v
 
 **Complete:**
 - Pre-Phase: testing infrastructure, CLI extensions, test data (HG002/HG003/HG004 chr22)
-- Phase 0: Baseline validation — Poisson clip model, ~1200 calls/sample, results in `results/phase0/`
-- Phase 1: ZINB clipping — `LgZINB()` replaces Poisson; pi/phi estimated via MOM; results in `results/phase1/`
+- Phase 0: Baseline validation — Poisson clip model, results in `results/phase0/`
+- Phase 1: ZINB clipping — `LgZINB()` replaces Poisson; pi/phi via MOM; results in `results/phase1/`
+- Phase 1.1: Emission calibration — asymmetric transition init + `--epsi-weight` penalty
 
 **Phase 1 ZINB Parameters (chr22 estimates):**
-- clipPi ≈ 0.997 (99.7% of bins have zero clips — correct for WGS)
+- clipPi ≈ 0.997 (99.7% of bins have zero clips)
 - clipPhi ≈ 0.29 (highly overdispersed NB component)
 - New param file fields: `clipPi`, `clipPhi` (backward-compatible reader)
+
+**Phase 1.1 Emission Penalty:**
+- `--epsi-weight 1.0` (default): applies per-bin NB LLR penalty to non-diploid states
+- Calibrated so ~100 boundary-level bins overcome the prior (same for both DEL and DUP)
+- CN=1 penalty (`lepsi21_nb ≈ −1.07/bin`) > CN=3 penalty (`lepsi23_nb ≈ −0.87/bin`)
+- Default `1.0` pending precision/recall eval against GIAB truth VCFs
+- Results in `results/phase1.1/` (use `--epsi-weight 0.0` to reproduce phase1 exactly)
 
 **Benchmarking Pipeline:**
 ```bash
 # Run samples for a given phase (no truth VCFs needed):
 snakemake -s benchmarks/benchmark.smk --configfile benchmarks/config.yaml \
-  --config phase=phase1 -j3 calls
+  --config phase=phase1.1 -j3 calls
+
+# With custom epsi-weight:
+snakemake -s benchmarks/benchmark.smk --configfile benchmarks/config.yaml \
+  --config phase=phase1.1 extra_args="--epsi-weight 0.5" -j3 filter
 
 # Full benchmark with truvari (needs benchmarks/truth/<SAMPLE>.chr22.truth.vcf.gz):
 snakemake -s benchmarks/benchmark.smk --configfile benchmarks/config.yaml \
-  --config phase=phase1 -j3 all
+  --config phase=phase1.1 -j3 all
 ```
 
 **Note:** hg38 chr22 reference is at `/Users/red/repos/MethSmoothEval/data/annotations/hg38.chr22.fa`.
