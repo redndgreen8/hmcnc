@@ -213,37 +213,44 @@ Where:
 
 ---
 
-## Phase 4: Transition Modification with Clipping
+## Phase 4: Directional Transition Modification [COMPLETED]
 
-### Formula
-Modify transition probabilities based on clipping evidence:
+### Design
+At each bin k, the effective log-transition probability for state i→j is:
 
 ```
-a_{t,ij} = a_{b,ij} × (1 + α × m_ij(P_L, P_R))
+log a_ij(k) = log-sum-exp(covCovTransP[i][j] + pN_ij(k),
+                           clipCovCovTransP[i][j] + pCl_ij(k))
 ```
 
-Where:
-- `a_{b,ij}` = base transition probability
-- `α` = clipping influence weight
-- `m_ij(P_L, P_R)` = direction-aware modifier function
+Where the clip posterior pair is selected by CN direction:
+- j < i (CN decreasing, deletion boundary): use PnL[k], PclL[k]
+- j > i (CN increasing, duplication boundary): use PnR[k], PclR[k]
+- j == i (self-transition): use Pn[k], Pcl[k]
 
-### Modifier Function
-```
-m_ij(P_L, P_R) = {
-  P_L - P_R  if transition expects left clips
-  P_R - P_L  if transition expects right clips
-  0          otherwise
-}
-```
+Same direction logic applied in the BW expected-transition accumulation.
 
-### Implementation Tasks
-- [ ] Define state transition expectations matrix
-- [ ] Implement `m_ij()` function
-- [ ] Add per-position transition modification
-- [ ] Tune α parameter
+### Implementation
 
-### Files to Modify
-- `src/hmmcnc.cpp` - Transition modification logic
+**New `ForwardBackwards` overload**: takes `Pn, Pcl, PnL, PclL, PnR, PclR`; uses a `clipPair` lambda to select per-(i,j) at each bin.
+
+**`BaumWelchEOnChrom`**: updated signature to accept all 6 posteriors; uses `dirPn`/`dirPcl` lambdas for both F-B call and expected-transition accumulation.
+
+**`ThreadInfo`**: added `nL, clL, nR, clR` pointers.
+
+**`ThreadedBWE`**: passes `(*nL)[curSeq]`, etc. to `BaumWelchEOnChrom`.
+
+**Call counts** (directional posteriors are subtle — coverage still dominates):
+
+| Sample | DEL | DUP | Total |
+|--------|-----|-----|-------|
+| HG002  | 175 | 353 | 528   |
+| HG003  | 160 | 306 | 466   |
+| HG004  | 183 | 322 | 505   |
+
+**Files modified:**
+- `src/hmmcnc.cpp` — new directional `ForwardBackwards`, updated `BaumWelchEOnChrom`, `ThreadInfo`, `ThreadedBWE`
+- `include/hmcnc.h` — new `ForwardBackwards` and `BaumWelchEOnChrom` declarations
 
 ---
 

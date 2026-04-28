@@ -270,7 +270,9 @@ public:
   vector<vector<int>> *clipBins;
   vector<vector<int>> *leftClipBins;
   vector<vector<int>> *rightClipBins;
-  vector<vector<double>> *cl,*n;
+  vector<vector<double>> *cl, *n;
+  vector<vector<double>> *clL, *nL;   // directional: left-clip posteriors
+  vector<vector<double>> *clR, *nR;   // directional: right-clip posteriors
   vector<vector<double>> *zinbClipHist; // [nStates][count] gamma-weighted histogram
   int zinbClipMax = 256;
 
@@ -778,6 +780,86 @@ double ForwardBackwards(const vector<double> &startP,
   return finalCol;
 }
 
+// Directional variant: uses left-clip posteriors (PnL/PclL) for CN-decreasing transitions,
+// right-clip posteriors (PnR/PclR) for CN-increasing transitions, and combined (Pn/Pcl)
+// for self-transitions.  State index == copy number (0..6).
+double ForwardBackwards(const vector<double> &startP,
+                        const vector<vector<double>> &covCovTransP,
+                        const vector<vector<double>> &clipCovCovTransP,
+                        const vector<vector<double>> &emisP,
+                        const vector<int> &obs,
+                        vector<vector<double>> &f,
+                        vector<vector<double>> &b,
+                        const vector<double> &Pn,  const vector<double> &Pcl,
+                        const vector<double> &PnL, const vector<double> &PclL,
+                        const vector<double> &PnR, const vector<double> &PclR) {
+  const int totObs     = static_cast<int>(obs.size());
+  const int nCovStates = static_cast<int>(startP.size());
+  assert(nCovStates > 0);
+
+  f.resize(nCovStates);
+  b.resize(nCovStates);
+  for (int i = 0; i < nCovStates; i++) {
+    f[i].resize(totObs + 1, 0);
+    b[i].resize(totObs + 1, 0);
+  }
+  for (int j = 0; j < nCovStates; j++) f[j][0] = startP[j];
+
+  if (nCovStates == 1) {
+    fill(f[0].begin(), f[0].end(), -1);
+    fill(b[0].begin(), b[0].end(), -1);
+    return 0;
+  }
+
+  // Helper: select the correct clip posterior pair for transition i→j
+  auto clipPair = [&](int i, int j, int k,
+                      double &pN, double &pCl) {
+    if      (j < i) { pN = PnL[k]; pCl = PclL[k]; }
+    else if (j > i) { pN = PnR[k]; pCl = PclR[k]; }
+    else            { pN = Pn[k];  pCl = Pcl[k];  }
+  };
+
+  double clipSum = 0;
+  for (int k = 0; k < totObs; k++) {
+    for (int i = 0; i < nCovStates; i++) {
+      double colSum = 0;
+      for (int j = 0; j < nCovStates; j++) {
+        double pN, pCl;
+        clipPair(j, i, k, pN, pCl);
+        clipSum = PairSumOfLogP(covCovTransP[i][j] + pN, clipCovCovTransP[i][j] + pCl);
+        colSum  = PairSumOfLogP(colSum, f[j][k] + clipSum);
+      }
+      f[i][k+1] = colSum + emisP[i][obs[k]];
+    }
+  }
+
+  double finalCol = 0;
+  for (int j = 0; j < nCovStates; j++)
+    finalCol = PairSumOfLogP(finalCol, f[j][totObs] + log(1./nCovStates));
+
+  for (int j = 0; j < nCovStates; j++) b[j][totObs] = startP[j];
+
+  for (int k = totObs - 1; k > 0; k--) {
+    for (int i = 0; i < nCovStates; i++) {
+      double colSum = 0;
+      for (int j = 0; j < nCovStates; j++) {
+        double pN, pCl;
+        clipPair(i, j, k, pN, pCl);
+        clipSum = PairSumOfLogP(covCovTransP[i][j] + pN, clipCovCovTransP[i][j] + pCl);
+        colSum  = PairSumOfLogP(colSum, b[j][k+1] + clipSum + emisP[j][obs[k]]);
+      }
+      b[i][k] = colSum;
+    }
+  }
+
+  double bfinalCol = 0;
+  for (int j = 0; j < nCovStates; j++)
+    bfinalCol = PairSumOfLogP(bfinalCol, b[j][1] + emisP[j][obs[0]] + log(1./nCovStates));
+
+  cerr << "Pf: " << finalCol << "\tPb: " << bfinalCol << endl;
+  return finalCol;
+}
+
 void ApplyPriorToClipTransP(vector<vector<int> > &f,
 			int nStates,
 			vector<vector<double> > &prior,
@@ -872,49 +954,43 @@ double BaumWelchEOnChrom(const vector<double> &startP,
 			 vector<vector<double>> &b,
 			 vector<vector<double>> &expCovCovNoClipTransP, vector<vector<double>> &expCovCovClipTransP,
 			 vector<vector<double>> &expEmisP,
-       vector<double> &Pn, vector<double> &Pcl) {
+       vector<double> &Pn, vector<double> &Pcl,
+       vector<double> &PnL, vector<double> &PclL,
+       vector<double> &PnR, vector<double> &PclR) {
 
   const int nStates = static_cast<int>(startP.size());
   const int nObs = obs.size();
-  const int nclObs = Pcl.size();
-  const int nNObs = Pn.size();
-
-  assert(nNObs==nclObs);
-  assert(nObs==nclObs);
+  assert(Pcl.size() == (size_t)nObs);
+  assert(Pn.size()  == (size_t)nObs);
 
   const double pxNoclip = ForwardBackwards(startP, covCovTransP, emisP, obs, f, b);
 
-  const double pxClip = ForwardBackwards(startP, covCovTransP, clipCovCovTransP, emisP, obs, f, b, Pn , Pcl);
+  const double pxClip = ForwardBackwards(startP, covCovTransP, clipCovCovTransP, emisP,
+                                         obs, f, b,
+                                         Pn, Pcl, PnL, PclL, PnR, PclR);
 
   std::cerr<<"\npxNoclip: "<<pxNoclip<<"\npxClip: "<<pxClip<<endl;
 
-  double pNoClipEdge = 0;
-  double pClipEdge = 0;
+  // Direction-aware clip posterior selection: decreasing CN → left; increasing → right.
+  auto dirPn  = [&](int i, int j, int k) -> double {
+    return (j < i) ? PnL[k] : (j > i) ? PnR[k] : Pn[k];
+  };
+  auto dirPcl = [&](int i, int j, int k) -> double {
+    return (j < i) ? PclL[k] : (j > i) ? PclR[k] : Pcl[k];
+  };
 
-
-  for (int k=1; k< nObs-1; k++) {
-    //
-    // Calculate total probability of all transitions at this step.
-    //
-    //
-    double logClipSum = 0;
-    double logNoClipSum = 0;
-    double transPsum = 0;
-    
-    
-    for (size_t i=0; i < covCovTransP.size(); i++) {
-      for (size_t j=0; j < covCovTransP[i].size(); j++) {
-        pNoClipEdge = f[i][k] + covCovTransP[i][j] + Pn[k] + emisP[j][obs[k]] + b[j][k+1];
-        pClipEdge   = f[i][k] + clipCovCovTransP[i][j] + Pcl[k] + emisP[j][obs[k]] + b[j][k+1];
-    		expCovCovNoClipTransP[i][j] += exp(pNoClipEdge - pxClip);
-    		expCovCovClipTransP[i][j]   += exp(pClipEdge - pxClip);
+  for (int k = 1; k < nObs - 1; k++) {
+    for (size_t i = 0; i < covCovTransP.size(); i++) {
+      for (size_t j = 0; j < covCovTransP[i].size(); j++) {
+        const double pN  = dirPn (i, j, k);
+        const double pCl = dirPcl(i, j, k);
+        const double pNoClipEdge = f[i][k] + covCovTransP[i][j]     + pN  + emisP[j][obs[k]] + b[j][k+1];
+        const double pClipEdge   = f[i][k] + clipCovCovTransP[i][j] + pCl + emisP[j][obs[k]] + b[j][k+1];
+        expCovCovNoClipTransP[i][j] += exp(pNoClipEdge - pxClip);
+        expCovCovClipTransP[i][j]   += exp(pClipEdge   - pxClip);
       }
     }
-
   }
-  //
-  // For now do not tune parameters for emission.
-  //
   return pxClip;
 }
 
@@ -1543,7 +1619,9 @@ void ThreadedBWE(ThreadInfo *threadInfo) {
                                 f, b,
                                 expCovNoClipTransP, expCovClipTransP,
                                 expEmisP,
-                                (*threadInfo->n)[curSeq], (*threadInfo->cl)[curSeq]);
+                                (*threadInfo->n)[curSeq],  (*threadInfo->cl)[curSeq],
+                                (*threadInfo->nL)[curSeq], (*threadInfo->clL)[curSeq],
+                                (*threadInfo->nR)[curSeq], (*threadInfo->clR)[curSeq]);
 
     //
     // Update expected transitions
@@ -2589,8 +2667,12 @@ int hmcnc(Parameters& params) {
     threadInfo[procIndex].hmmChrom = params.hmmChrom;
     threadInfo[procIndex].transP = &covCovTransP;
     threadInfo[procIndex].clTransP = &clipCovCovTransP;
-    threadInfo[procIndex].cl = &Pcl;
-    threadInfo[procIndex].n = &Pn;
+    threadInfo[procIndex].cl  = &Pcl;
+    threadInfo[procIndex].n   = &Pn;
+    threadInfo[procIndex].clL = &PclL;
+    threadInfo[procIndex].nL  = &PnL;
+    threadInfo[procIndex].clR = &PclR;
+    threadInfo[procIndex].nR  = &PnR;
     threadInfo[procIndex].expTransP = &expCovCovTransP;
     threadInfo[procIndex].expClipTransP = &expCovCovClipTransP;
     threadInfo[procIndex].expEmisP = &expEmisP;
@@ -3335,7 +3417,8 @@ int hmcnc(Parameters& params) {
     vector<vector<double>> f;
     vector<vector<double>> b;
     for (size_t i = 0; i < covBins.size(); ++i) {
-      ForwardBackwards(startP, covCovTransP, clipCovCovTransP, emisP, covBins[i], f, b, Pn[i] , Pcl[i]);
+      ForwardBackwards(startP, covCovTransP, clipCovCovTransP, emisP, covBins[i], f, b,
+                       Pn[i], Pcl[i], PnL[i], PclL[i], PnR[i], PclR[i]);
       StorePosteriorMaxIntervals(covBins[i], f, b, copyIntervals[i]);
     }
   }

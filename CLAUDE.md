@@ -156,37 +156,38 @@ meson test -v
 - Phase 0: Baseline validation — Poisson clip model, results in `results/phase0/`
 - Phase 1: ZINB clipping — `LgZINB()` replaces Poisson; pi/phi via MOM; results in `results/phase1/`
 - Phase 1.1: Emission calibration — asymmetric transition init + `--epsi-weight` penalty
+- Phase 2: Directional clipping — separate L/R clip bins + ZINB params; results in `results/phase2/`
+- Phase 3: Newton-Raphson dispersion — `UpdateZINBPhi` in BW M-step; results in `results/phase3/`
+- Phase 4: Directional transition modification — direction-aware clip posteriors in F-B and BW E-step; results in `results/phase4/`
 
-**Phase 1 ZINB Parameters (chr22 estimates):**
-- clipPi ≈ 0.997 (99.7% of bins have zero clips)
-- clipPhi ≈ 0.29 (highly overdispersed NB component)
-- New param file fields: `clipPi`, `clipPhi` (backward-compatible reader)
+**Phase ZINB Parameters (BW-updated, chr22):**
+- MOM init: clipPi ≈ 0.997, clipPhi ≈ 0.29
+- After NR in BW loop: clipPhi converges to ~0.85–1.3 (tighter, γ-weighted)
+- Left clip: pi ≈ 0.999, phi ≈ 0.37; Right clip: pi ≈ 0.999, phi ≈ 0.26 (MOM estimates)
 
-**Phase 1.1 Emission Penalty:**
-- `--epsi-weight 1.0` (default): applies per-bin NB LLR penalty to non-diploid states
-- Calibrated so ~100 boundary-level bins overcome the prior (same for both DEL and DUP)
-- CN=1 penalty (`lepsi21_nb ≈ −1.07/bin`) > CN=3 penalty (`lepsi23_nb ≈ −0.87/bin`)
-- Default `1.0` pending precision/recall eval against GIAB truth VCFs
-- Results in `results/phase1.1/` (use `--epsi-weight 0.0` to reproduce phase1 exactly)
+**Directional Convention:**
+- Left clips (frontClip, S at CIGAR start): CN-decreasing transitions (j < i)
+- Right clips (backClip, S at CIGAR end): CN-increasing transitions (j > i)
+- Self-transitions (j == i): combined Pn/Pcl
 
 **Benchmarking Pipeline:**
 ```bash
 # Run samples for a given phase (no truth VCFs needed):
 snakemake -s benchmarks/benchmark.smk --configfile benchmarks/config.yaml \
-  --config phase=phase1.1 -j3 calls
+  --config phase=phase4 -j3 calls
 
 # With custom epsi-weight:
 snakemake -s benchmarks/benchmark.smk --configfile benchmarks/config.yaml \
-  --config phase=phase1.1 extra_args="--epsi-weight 0.5" -j3 filter
+  --config phase=phase4 extra_args="--epsi-weight 0.5" -j3 filter
 
 # Full benchmark with truvari (needs benchmarks/truth/<SAMPLE>.chr22.truth.vcf.gz):
 snakemake -s benchmarks/benchmark.smk --configfile benchmarks/config.yaml \
-  --config phase=phase1.1 -j3 all
+  --config phase=phase4 -j3 all
 ```
 
 **Note:** hg38 chr22 reference is at `/Users/red/repos/MethSmoothEval/data/annotations/hg38.chr22.fa`.
 The symlinks in `data/chr22_test/` are broken. Reference goes **last** in the command line.
 
-**Next Phase:** Phase 2 - Directional clipping (separate L/R clip counts)
+**Next Phase:** Phase 5 — dual forward-backward passes with clip-evidence posteriors (`bw_modified.pdf`)
 
 See `docs/IMPLEMENTATION_ROADMAP.md` for full roadmap.

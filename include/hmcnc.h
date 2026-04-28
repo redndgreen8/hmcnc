@@ -100,7 +100,9 @@ double BaumWelchEOnChrom(const std::vector<double> &startP,
                           std::vector<std::vector<double>> &b,
                           std::vector<std::vector<double>> &expCovCovTransP,
                           std::vector<std::vector<double>> &expEmisP,
-                          std::vector<double> &Pn, std::vector<double> &Pcl);
+                          std::vector<double> &Pn,  std::vector<double> &Pcl,
+                          std::vector<double> &PnL, std::vector<double> &PclL,
+                          std::vector<double> &PnR, std::vector<double> &PclR);
 
 void BaumWelchM(const std::vector<double> &startP,
                 const std::vector<std::vector<double>> &transP,
@@ -143,6 +145,17 @@ double ForwardBackwards(const std::vector<double> &startP,
                         std::vector<std::vector<double>> &f,
                         std::vector<std::vector<double>> &b,
                         std::vector<double> &Pn, std::vector<double> &Pcl);
+
+double ForwardBackwards(const std::vector<double> &startP,
+                        const std::vector<std::vector<double>> &covCovTransP,
+                        const std::vector<std::vector<double>> &clipCovCovTransP,
+                        const std::vector<std::vector<double>> &emisP,
+                        const std::vector<int> &obs,
+                        std::vector<std::vector<double>> &f,
+                        std::vector<std::vector<double>> &b,
+                        const std::vector<double> &Pn,  const std::vector<double> &Pcl,
+                        const std::vector<double> &PnL, const std::vector<double> &PclL,
+                        const std::vector<double> &PnR, const std::vector<double> &PclR);
 
 int GetRefAndAlt(char refNuc, const std::vector<int> &counts,
                  int &ref, int &alt);
