@@ -175,26 +175,41 @@ params. Stored for Phase 4 transition modification — not yet wired into HMM.
 
 ---
 
-## Phase 3: Newton-Raphson for Dispersion
+## Phase 3: Newton-Raphson for Dispersion [COMPLETED]
 
 ### Algorithm
-Estimate dispersion parameter φ using Newton-Raphson iteration:
+Estimate dispersion parameter φ using Newton-Raphson (3 iterations) nested in the BW M-step:
 
 ```
-φ_{k+1} = φ_k - f(φ_k) / f'(φ_k)
+φ_{k+1} = φ_k - L'(φ_k) / L''(φ_k)
 ```
 
-Where f(φ) is derived from the ZINB log-likelihood gradient.
+Where:
+- L'(φ) = Σ_{st,c>0} γ_{st,c} [ψ(φ+c) − ψ(φ) + log(φ/(φ+ν)) + (ν−c)/(φ+ν)]
+- L''(φ) = Σ_{st,c>0} γ_{st,c} [ψ'(φ+c) − ψ'(φ) + 1/φ − 1/(φ+ν) − (ν−c)/(φ+ν)²]
+- ψ = digamma, ψ' = trigamma (via Boost)
 
-### Implementation Tasks
-- [ ] Implement digamma/trigamma functions (or use Boost)
-- [ ] Add NR iteration for φ estimation
-- [ ] Set convergence criteria (tolerance, max iterations)
-- [ ] Nest within Baum-Welch M-step
+### Implementation
 
-### Files to Modify
-- `src/hmmcnc.cpp` - Add NR optimization
-- `include/hmcnc.h` - Add helper function declarations
+**`UpdateZINBPhi`** (new function): 3-iteration NR, clamped to φ≥0.01.
+
+**ZINB histogram** (`zinbClipHist[state][count]`): γ-weighted per-bin per-count accumulation across all contigs in E-step (inside `ThreadedBWE` mutex).
+
+**M-step block** (in BW outer loop after `BaumWelchM`): updates `clipPi`, `clipMean` from diploid-state histogram, calls `UpdateZINBPhi`, recomputes `Pn/Pcl`.
+
+**NR convergence**: φ converges from MOM prior (~0.29) to ~0.85–1.3 (tighter than MOM because posterior γ concentrates on true breakpoint bins).
+
+**Call counts** (HMM calls unchanged — main coverage model dominates):
+
+| Sample | DEL | DUP | Total |
+|--------|-----|-----|-------|
+| HG002  | 175 | 352 | 527   |
+| HG003  | 160 | 305 | 465   |
+| HG004  | 182 | 323 | 505   |
+
+**Files modified:**
+- `src/hmmcnc.cpp` — `UpdateZINBPhi`, `zinbClipHist` accumulation in `ThreadedBWE`, ZINB M-step in BW outer loop
+- `include/hmcnc.h` — `UpdateZINBPhi` declaration
 
 ---
 

@@ -155,6 +155,11 @@ double LgPrpoiss(int cn,  int cov, int Hmean);
 
 double LgZINB(int count, double pi, double mu, double phi);
 
+double UpdateZINBPhi(double phi,
+                     const std::vector<double>& nu,
+                     const std::vector<std::vector<double>>& hist,
+                     int nrIter = 3);
+
 void Moments(const std::vector<double> &v, double &ex, double &var);
 
 double PairSumOfLogP(double a, double b);

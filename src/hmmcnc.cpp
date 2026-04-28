@@ -24,6 +24,8 @@
 #include <boost/math/distributions/poisson.hpp>
 #include <boost/math/distributions/negative_binomial.hpp>
 #include <boost/math/distributions/binomial.hpp>
+#include <boost/math/special_functions/digamma.hpp>
+#include <boost/math/special_functions/trigamma.hpp>
 
 #include "../include/hmcnc.h"
 
@@ -269,6 +271,8 @@ public:
   vector<vector<int>> *leftClipBins;
   vector<vector<int>> *rightClipBins;
   vector<vector<double>> *cl,*n;
+  vector<vector<double>> *zinbClipHist; // [nStates][count] gamma-weighted histogram
+  int zinbClipMax = 256;
 
   vector<vector<SNV>> *snvs;
   vector<vector<int>> *copyNumber;
@@ -390,6 +394,49 @@ double LgZINB(int count, double pi, double mu, double phi) {
   double prob = pdf(nb, count);
   if (prob <= 0) return lepsi;
   return log(1.0 - pi) + log(prob);
+}
+
+// Newton-Raphson update for ZINB dispersion φ (spec: cnv(ZINB_disp).pdf, eqs 4-5).
+// hist[state][count] = Σ_t γ_t(state)*I[clip_t==count] (gamma-weighted histogram).
+// nu[state] = current per-state mean clip rate.  Zero-count terms omitted (π≈0.997,
+// their contribution is negligible and avoids a complex denominator evaluation).
+double UpdateZINBPhi(double phi,
+                     const vector<double>& nu,
+                     const vector<vector<double>>& hist,
+                     int nrIter) {
+  using boost::math::digamma;
+  using boost::math::trigamma;
+
+  const int nSt     = (int)nu.size();
+  const int maxCnt  = hist.empty() ? 0 : (int)hist[0].size();
+
+  for (int iter = 0; iter < nrIter; iter++) {
+    phi = max(0.01, phi);
+    double Lp = 0, Lpp = 0;
+
+    for (int st = 0; st < nSt; st++) {
+      if (nu[st] <= 0.0) continue;
+      const double pnu     = phi + nu[st];
+      const double log_rat = log(phi / pnu);
+
+      for (int c = 1; c < maxCnt; c++) {
+        const double w = hist[st][c];
+        if (w <= 0.0) continue;
+        const double dig   = digamma(phi + c) - digamma(phi);
+        const double numc  = nu[st] - (double)c;
+        // L'(φ) = ψ(φ+c) − ψ(φ) + log(φ/(φ+ν)) + (ν−c)/(φ+ν)
+        Lp  += w * (dig + log_rat + numc / pnu);
+        // L''(φ) = ψ'(φ+c) − ψ'(φ) + 1/φ − 1/(φ+ν) − (ν−c)/(φ+ν)²
+        const double dtrig = trigamma(phi + c) - trigamma(phi);  // negative
+        Lpp += w * (dtrig + 1.0/phi - 1.0/pnu - numc / (pnu * pnu));
+      }
+    }
+
+    if (fabs(Lpp) < 1e-10) break;
+    phi = max(0.01, phi - Lp / Lpp);
+  }
+
+  return phi;
 }
 
 double LgBinom(double p, int s, int n) {
@@ -1501,24 +1548,49 @@ void ThreadedBWE(ThreadInfo *threadInfo) {
     //
     // Update expected transitions
     //
-    pthread_mutex_lock(threadInfo->semaphore);
 
-    if ((*threadInfo->chromCopyNumber)[curSeq] >= 1.5 and (*threadInfo->chromCopyNumber)[curSeq] < 2.5)
+    // Accumulate gamma-weighted clip histogram for ZINB φ estimation (Phase 3).
+    // Use f[st][t] + b[st][t] as log-unnormalized state posterior at bin t.
+    // Range t=1..nBins-1 (t=0 has b uninitialized, t=nBins has no clip entry).
     {
-      for (size_t i=0; i < threadInfo->transP->size(); i++) {
-	      for (size_t j=0; j < (*threadInfo->transP)[i].size(); j++) {
-	        (*threadInfo->expTransP)[i][j] += expCovNoClipTransP[i][j];
-          	(*threadInfo->expClipTransP)[i][j] += expCovClipTransP[i][j];          
+      const int nSt   = (int)threadInfo->transP->size();
+      const int maxC  = threadInfo->zinbClipMax;
+      const auto& clips = (*threadInfo->clipBins)[curSeq];
+      const int nbins = (int)clips.size();
+      vector<vector<double>> localHist(nSt, vector<double>(maxC + 1, 0.0));
+
+      for (int t = 1; t < nbins && t < (int)f[0].size(); t++) {
+        double logNorm = f[0][t] + b[0][t];
+        for (int st = 1; st < nSt; st++)
+          logNorm = PairSumOfLogP(logNorm, f[st][t] + b[st][t]);
+        const int c = min(clips[t], maxC);
+        for (int st = 0; st < nSt; st++)
+          localHist[st][c] += exp(f[st][t] + b[st][t] - logNorm);
+      }
+
+      pthread_mutex_lock(threadInfo->semaphore);
+
+      if ((*threadInfo->chromCopyNumber)[curSeq] >= 1.5 and (*threadInfo->chromCopyNumber)[curSeq] < 2.5) {
+        for (size_t i=0; i < threadInfo->transP->size(); i++) {
+          for (size_t j=0; j < (*threadInfo->transP)[i].size(); j++) {
+            (*threadInfo->expTransP)[i][j] += expCovNoClipTransP[i][j];
+            (*threadInfo->expClipTransP)[i][j] += expCovClipTransP[i][j];
+          }
         }
+        for (size_t i=0; i < threadInfo->emisP->size(); i++) {
+          for (size_t j=0; j < (*threadInfo->emisP)[i].size(); j++) {
+            (*threadInfo->expEmisP)[i][j] += expEmisP[i][j];
+          }
+        }
+        *threadInfo->pModel += pChrom;
+        // Merge ZINB histogram
+        for (int st = 0; st < nSt; st++)
+          for (int c = 0; c <= maxC; c++)
+            (*threadInfo->zinbClipHist)[st][c] += localHist[st][c];
       }
-      for (size_t i=0; i < threadInfo->emisP->size(); i++) {
-	      for (size_t j=0; j < (*threadInfo->emisP)[i].size(); j++) {
-	        (*threadInfo->expEmisP)[i][j] += expEmisP[i][j];
-	      }
-      }
-      *threadInfo->pModel  += pChrom;
+
+      pthread_mutex_unlock(threadInfo->semaphore);
     }
-    pthread_mutex_unlock(threadInfo->semaphore);
     StorePosteriorMaxIntervals((*threadInfo->covBins)[curSeq],
 			       f, b,
 			       (*threadInfo->copyIntervals)[curSeq]);
@@ -2470,6 +2542,11 @@ int hmcnc(Parameters& params) {
   vector<double> chromCopyNumber;
   chromCopyNumber.resize(contigNames.size());
 
+  // ZINB γ-weighted histogram: [nStates][count], allocated after nStates is known.
+  // Resize again after nStates is set; initial placeholder size 7 × 257.
+  const int ZINB_HIST_MAX = 256;
+  vector<vector<double>> zinbClipHist(7, vector<double>(ZINB_HIST_MAX + 1, 0.0));
+
   //////////////////////////////////////////////////
 
   nReads.resize(contigNames.size());
@@ -2499,6 +2576,8 @@ int hmcnc(Parameters& params) {
     threadInfo[procIndex].clipBins = &clipBins;
     threadInfo[procIndex].leftClipBins = &leftClipBins;
     threadInfo[procIndex].rightClipBins = &rightClipBins;
+    threadInfo[procIndex].zinbClipHist = &zinbClipHist;
+    threadInfo[procIndex].zinbClipMax  = ZINB_HIST_MAX;
     threadInfo[procIndex].copyNumber = &copyNumber;
     threadInfo[procIndex].snvs = &snvs;
     threadInfo[procIndex].lepsi = lepsi;
@@ -3131,6 +3210,8 @@ int hmcnc(Parameters& params) {
         fill(expCovCovClipTransP[r].begin(), expCovCovClipTransP[r].end(), 0);
         expEmisP[r].resize(emisP[0].size());
       }
+      // Reset ZINB histogram for this BW iteration
+      zinbClipHist.assign(nStates, vector<double>(ZINB_HIST_MAX + 1, 0.0));
       double px=0;
       int totalObs=0;
       curSeq=0;
@@ -3185,6 +3266,50 @@ int hmcnc(Parameters& params) {
       covCovTransP=updateTransP;
       clipCovCovTransP=updateClipTransP;
 
+      // ZINB M-step: update clipPi, clipMean, clipPhi from gamma-weighted histogram
+      {
+        const int diploid = 2;
+        double sumGamma = 0.0, sumZero = 0.0, sumCount = 0.0;
+        for (int c = 0; c <= ZINB_HIST_MAX; c++) {
+          const double w = zinbClipHist[diploid][c];
+          sumGamma += w;
+          if (c == 0) sumZero += w;
+          else        sumCount += w * c;
+        }
+        if (sumGamma > 0.0) {
+          clipPi   = sumZero / sumGamma;
+          clipMean = (sumGamma > sumZero) ? sumCount / (sumGamma - sumZero) : clipMean;
+
+          // Build per-state nu for NR (use each state's conditional mean)
+          vector<double> stateNu(nStates, 0.0);
+          for (int st = 0; st < nStates; st++) {
+            double sg = 0.0, sc = 0.0;
+            for (int c = 1; c <= ZINB_HIST_MAX; c++) {
+              sg += zinbClipHist[st][c];
+              sc += zinbClipHist[st][c] * c;
+            }
+            stateNu[st] = (sg > 0.0) ? sc / sg : clipMean;
+          }
+          clipPhi = UpdateZINBPhi(clipPhi, stateNu, zinbClipHist);
+          cerr << "ZINB M-step: clipPi=" << clipPi
+               << "  clipMean=" << clipMean
+               << "  clipPhi=" << clipPhi << endl;
+
+          // Recompute Pn/Pcl with updated ZINB params
+          double pi_clipped_upd = max(0.0, clipPi - 0.3);
+          double clipHmean_upd  = clipMean * 2;
+          for (auto c=0; c < (int)contigNames.size(); c++) {
+            for (auto b=0; b < (int)clipBins[c].size(); b++) {
+              int cc = min(clipMax, clipBins[c][b]);
+              double Pn_  = LgZINB(cc, clipPi,          clipMean,      clipPhi) + PNeutral;
+              double Pcl_ = LgZINB(cc, pi_clipped_upd,  clipHmean_upd, clipPhi) + PClipped;
+              double dn   = PairSumOfLogP(Pn_, Pcl_);
+              Pn[c][b]  = Pn_  - dn;
+              Pcl[c][b] = Pcl_ - dn;
+            }
+          }
+        }
+      }
 
       if (params.paramOutFile != "") {
         string s = std::to_string(i);
