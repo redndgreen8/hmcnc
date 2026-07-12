@@ -15,19 +15,31 @@ Usage:
     snakemake -s benchmarks/benchmark.smk --configfile benchmarks/config.yaml \
         --config phase=phase1 -j3 filter
 
+    # Prepare CNV truth VCF (DEL + INS→DUP, once per truth set):
+    snakemake -s benchmarks/benchmark.smk --configfile benchmarks/config.yaml -j1 prepare_truth
+
     # Full benchmark with truvari (needs benchmarks/truth/ populated):
     snakemake -s benchmarks/benchmark.smk --configfile benchmarks/config.yaml \
-        --config phase=phase1 -j3
+        --config phase=phase1 -j3 bench
 
 Config keys:
-    phase       - label for output directory (e.g. "phase0", "phase1")
-    ref         - hg38 chr22 FASTA path (must have .fai)
-    truth_dir   - directory with <SAMPLE>.chr22.truth.vcf.gz (+.tbi)
-    bam_dir     - directory with <SAMPLE>.chr22.bam (+.bai)
-    binary      - path to hmcnclip binary
-    excl_bed    - exclusion regions BED (default: HMM/annotation/hg38.region_to_EXCLUDE.bed)
-    repeat_bed  - repeat mask BED      (default: HMM/annotation/hg38.repeatMask.merged.bed)
-    extra_args  - extra hmcnclip CLI args (default: "")
+    phase         - label for output directory (e.g. "phase0", "phase1")
+    ref           - hg38 chr22 FASTA path (must have .fai)
+    truth_dir     - directory with truth VCFs
+    bam_dir       - directory with <SAMPLE>.chr22.bam (+.bai)
+    binary        - path to hmcnclip binary
+    excl_bed      - exclusion regions BED (default: HMM/annotation/hg38.region_to_EXCLUDE.bed)
+    repeat_bed    - repeat mask BED      (default: HMM/annotation/hg38.repeatMask.merged.bed)
+    extra_args    - extra hmcnclip CLI args (default: "")
+    min_sv_size   - minimum SV size for benchmarking in bp (default: 1000)
+    bench_samples - samples with truth VCFs available (default: ["HG002"])
+
+Truth VCF preparation notes:
+    DEL truth: PASS records with SVLEN >= min_sv_size from HG002_SVs_Tier1_v0.6.vcf.gz
+    DUP truth: INS records with REPTYPE=DUP and SVLEN >= min_sv_size, with END expanded
+               to POS+SVLEN and SVTYPE renamed to DUP. These represent tandem duplications
+               that appear as insertions in SV callers but as elevated coverage in CNV callers.
+               (chr22: ~48 events >= 1kb, ~11 >= 5kb — sparse but directionally informative)
 """
 
 import json
@@ -45,9 +57,11 @@ EXCL_BED   = config.get("excl_bed",   "HMM/annotation/hg38.region_to_EXCLUDE.bed
 REPEAT_BED = config.get("repeat_bed", "HMM/annotation/hg38.repeatMask.merged.bed")
 FILTER_SH  = config.get("filter_sh",  "HMM/filter_finalize_call.sh")
 
-SAMPLES    = config.get("samples",    ["HG002", "HG003", "HG004"])
-OUTDIR     = f"results/{PHASE}"
-EXTRA_ARGS = config.get("extra_args", "")
+SAMPLES       = config.get("samples",       ["HG002", "HG003", "HG004"])
+BENCH_SAMPLES = config.get("bench_samples", ["HG002"])   # samples with truth VCFs
+MIN_SV_SIZE   = config.get("min_sv_size",   1000)        # bp; filters both truth and calls
+OUTDIR        = f"results/{PHASE}"
+EXTRA_ARGS    = config.get("extra_args", "")
 
 # ── Targets ──────────────────────────────────────────────────────────────────
 
@@ -55,7 +69,13 @@ EXTRA_ARGS = config.get("extra_args", "")
 rule all:
     input:
         f"{OUTDIR}/summary.tsv",
-        expand(f"{OUTDIR}/truvari/{{sample}}/summary.json", sample=SAMPLES),
+        expand(f"{OUTDIR}/truvari/{{sample}}/summary.json", sample=BENCH_SAMPLES),
+
+# truvari + summary (alias for all, explicit name for CLI use)
+rule bench:
+    input:
+        f"{OUTDIR}/summary.tsv",
+        expand(f"{OUTDIR}/truvari/{{sample}}/summary.json", sample=BENCH_SAMPLES),
 
 # Just hmcnclip, no post-processing
 rule calls:
@@ -247,7 +267,78 @@ rule make_igv_session:
             f.write(xml)
 
 
-# ── Step 4: Sort + bgzip + index VCF ─────────────────────────────────────────
+# ── Step 4a: Prepare CNV truth VCF ───────────────────────────────────────────
+# Builds HG002.chr22.cnv.truth.vcf.gz from Tier1 SV VCF:
+#   DEL: PASS records with SVLEN >= MIN_SV_SIZE
+#   DUP: INS records with REPTYPE=DUP and SVLEN >= MIN_SV_SIZE, END expanded to
+#        POS+SVLEN so the record spans the duplicated region for overlap matching.
+# Run once: snakemake -s benchmarks/benchmark.smk prepare_truth -j1
+
+rule prepare_truth:
+    input:
+        vcf = f"{TRUTH_DIR}/HG002.chr22.truth.vcf.gz",
+        tbi = f"{TRUTH_DIR}/HG002.chr22.truth.vcf.gz.tbi",
+    output:
+        vcf = f"{TRUTH_DIR}/HG002.chr22.cnv.truth.vcf.gz",
+        tbi = f"{TRUTH_DIR}/HG002.chr22.cnv.truth.vcf.gz.tbi",
+    params:
+        min_size = MIN_SV_SIZE,
+    run:
+        import subprocess, re, os
+
+        min_size = int(params.min_size)
+        tmp = output.vcf.replace(".vcf.gz", ".tmp.vcf")
+
+        header = subprocess.run(
+            ["bcftools", "view", "-h", input.vcf],
+            capture_output=True, text=True, check=True,
+        ).stdout
+
+        records = subprocess.run(
+            ["bcftools", "view", "-H", input.vcf],
+            capture_output=True, text=True, check=True,
+        ).stdout
+
+        kept_del = kept_dup = 0
+        with open(tmp, "w") as out:
+            out.write(header)
+            for line in records.splitlines():
+                f = line.split("\t")
+                if len(f) < 8:
+                    continue
+                info = f[7]
+                svtype_m = re.search(r"SVTYPE=(\w+)", info)
+                svlen_m  = re.search(r"SVLEN=(-?\d+)", info)
+                if not svtype_m or not svlen_m:
+                    continue
+                svtype = svtype_m.group(1)
+                svlen  = abs(int(svlen_m.group(1)))
+                if svlen < min_size:
+                    continue
+
+                if svtype == "DEL" and f[6] == "PASS":
+                    out.write(line + "\n")
+                    kept_del += 1
+                elif svtype == "INS":
+                    reptype_m = re.search(r"REPTYPE=(\w+)", info)
+                    if not reptype_m or reptype_m.group(1) != "DUP":
+                        continue
+                    new_end = int(f[1]) + svlen
+                    f[4]  = "<DUP>"
+                    f[6]  = "PASS"
+                    info  = re.sub(r"SVTYPE=INS", "SVTYPE=DUP", info)
+                    info  = re.sub(r"END=\d+",    f"END={new_end}", info)
+                    f[7]  = info
+                    out.write("\t".join(f) + "\n")
+                    kept_dup += 1
+
+        subprocess.run(["bcftools", "sort", "-O", "z", "-o", output.vcf, tmp], check=True)
+        subprocess.run(["tabix", "-p", "vcf", output.vcf], check=True)
+        os.remove(tmp)
+        print(f"prepare_truth: {kept_del} DEL + {kept_dup} DUP (from INS REPTYPE=DUP) >= {min_size}bp")
+
+
+# ── Step 4b: Sort + bgzip + index VCF ────────────────────────────────────────
 
 rule prepare_vcf:
     input:
@@ -262,14 +353,18 @@ rule prepare_vcf:
         """
 
 
-# ── Step 4: Truvari bench ─────────────────────────────────────────────────────
+# ── Step 5: Truvari bench ─────────────────────────────────────────────────────
+# Uses prepared CNV truth (DEL + INS→DUP). Only runs for BENCH_SAMPLES.
+# DEL precision/recall: direct comparison.
+# DUP precision/recall: approximate — truth DUPs are INS records with REPTYPE=DUP
+#   whose coordinates have been expanded; not all DUP calls will have a truth match.
 
 rule truvari_bench:
     input:
         vcf   = f"{OUTDIR}/{{sample}}.vcf.gz",
         tbi   = f"{OUTDIR}/{{sample}}.vcf.gz.tbi",
-        truth = f"{TRUTH_DIR}/{{sample}}.chr22.truth.vcf.gz",
-        trtbi = f"{TRUTH_DIR}/{{sample}}.chr22.truth.vcf.gz.tbi",
+        truth = f"{TRUTH_DIR}/HG002.chr22.cnv.truth.vcf.gz",
+        trtbi = f"{TRUTH_DIR}/HG002.chr22.cnv.truth.vcf.gz.tbi",
         ref   = REF,
     output:
         summary = f"{OUTDIR}/truvari/{{sample}}/summary.json",
@@ -278,7 +373,8 @@ rule truvari_bench:
         fp      = f"{OUTDIR}/truvari/{{sample}}/fp.vcf.gz",
         fn      = f"{OUTDIR}/truvari/{{sample}}/fn.vcf.gz",
     params:
-        outdir = f"{OUTDIR}/truvari/{{sample}}",
+        outdir   = f"{OUTDIR}/truvari/{{sample}}",
+        min_size = MIN_SV_SIZE,
     shell:
         """
         rm -rf {params.outdir}
@@ -288,22 +384,22 @@ rule truvari_bench:
             -o {params.outdir} \
             --pick multi \
             -r 500 \
-            --svtype DEL DUP \
             --passonly \
+            --size-min {params.min_size} \
             -p 0.0
         """
 
 
-# ── Step 5: Summary table ─────────────────────────────────────────────────────
+# ── Step 6: Summary table ─────────────────────────────────────────────────────
 
 rule summarize:
     input:
-        jsons = expand(f"{OUTDIR}/truvari/{{sample}}/summary.json", sample=SAMPLES),
+        jsons = expand(f"{OUTDIR}/truvari/{{sample}}/summary.json", sample=BENCH_SAMPLES),
     output:
         tsv = f"{OUTDIR}/summary.tsv",
     run:
         rows = []
-        for sample, jpath in zip(SAMPLES, input.jsons):
+        for sample, jpath in zip(BENCH_SAMPLES, input.jsons):
             with open(jpath) as fh:
                 d = json.load(fh)
             rows.append({
