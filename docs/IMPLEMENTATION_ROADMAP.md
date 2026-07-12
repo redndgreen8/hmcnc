@@ -135,22 +135,31 @@ and select the production default for `--epsi-weight`.
 
 ### Concept
 Separate left-clips and right-clips per bin:
-- **Left clips (P_L)**: frontClip (S at CIGAR start, counted at `startpos`) → deletion START, duplication END
-- **Right clips (P_R)**: backClip (S at CIGAR end, counted at `endpos`) → deletion END, duplication START
+- **Left clips (P_L)**: leading H/S, recorded at alignment `startpos` → right-hand CNV boundary (CN-increasing: j > i)
+  - deletion→normal (1→2) and normal→duplication (2→3)
+- **Right clips (P_R)**: trailing H/S, recorded at alignment `endpos` → left-hand CNV boundary (CN-decreasing: j < i)
+  - normal→deletion (2→1) and duplication→normal (3→2)
 
 ### Expected Patterns
-| State Transition | Expected Clips |
-|-----------------|----------------|
-| Normal → Deletion (2→1) | High P_L |
-| Deletion → Normal (1→2) | High P_R |
-| Normal → Duplication (2→3) | High P_R |
-| Duplication → Normal (3→2) | High P_L |
+| State Transition               | Direction | Expected Clips |
+|--------------------------------|-----------|----------------|
+| Normal → Deletion  (2→1, CN↓) | j < i     | High P_R       |
+| Deletion → Normal  (1→2, CN↑) | j > i     | High P_L       |
+| Normal → Duplication (2→3, CN↑)| j > i     | High P_L       |
+| Duplication → Normal (3→2, CN↓)| j < i     | High P_R       |
 
 ### Implementation
 
-**BAM processing**: `ParseChrom` routes `frontClipLen > MIN_CLIP_LENGTH` into `leftClipBins`
-and `backClipLen > MIN_CLIP_LENGTH` into `rightClipBins`. Combined `clipBins` still populated
-for backward-compat HMM logic (unchanged from Phase 1.1).
+**BAM processing**: `ParseChrom` collects supplementary alignments (flag `BAM_FSUPPLEMENTARY`)
+into `suppReads` and processes them separately from primary reads.
+- **Supplementary reads** (minimap2/pbmm2 split-read output): leading H/S → `leftClipBins` at
+  `pos`; trailing H/S → `rightClipBins` at `endpos`. This is the primary SV signal for long-read
+  aligners — at real breakpoints pbmm2/minimap2 emit supplementaries rather than primary soft-clips.
+- **Primary reads**: leading S → `leftClipBins`; trailing S → `rightClipBins`. Retained for
+  completeness but dominated by pericentromeric noise in minimap2 data.
+
+Both sources feed the same `clipBins`/`leftClipBins`/`rightClipBins` arrays. Secondary alignments
+(flag `BAM_FSECONDARY`) are skipped entirely.
 
 **ZINB parameters**: separate MOM estimation for L and R clips via `estimateZINB` lambda.
 Logged to stderr as `Left clip — mean/pi/phi` and `Right clip — mean/pi/phi`.
@@ -224,8 +233,8 @@ log a_ij(k) = log-sum-exp(covCovTransP[i][j] + pN_ij(k),
 ```
 
 Where the clip posterior pair is selected by CN direction:
-- j < i (CN decreasing, deletion boundary): use PnL[k], PclL[k]
-- j > i (CN increasing, duplication boundary): use PnR[k], PclR[k]
+- j > i (CN increasing: deletion→normal, normal→duplication): use PnL[k], PclL[k]
+- j < i (CN decreasing: normal→deletion, duplication→normal): use PnR[k], PclR[k]
 - j == i (self-transition): use Pn[k], Pcl[k]
 
 Same direction logic applied in the BW expected-transition accumulation.
@@ -254,31 +263,41 @@ Same direction logic applied in the BW expected-transition accumulation.
 
 ---
 
-## Phase 5: Baum-Welch with Clip Evidence
+## Phase 5: Directional ZINB M-step [COMPLETED]
 
-### Dual Forward-Backward
-Run two forward-backward passes:
-1. **Neutral**: Using base transitions `a_{b,ij}`
-2. **Clipped**: Using modified transitions `a_{t,ij}`
+### Design
+Extend the Phase 3 combined ZINB M-step to update directional ZINB parameters
+(πL, μL, φL, πR, μR, φR) separately using γ-weighted directional clip histograms.
+These parameters were MOM-initialized in Phase 2 and held fixed through Phase 4.
 
-### Posterior Combination
-Combine posteriors with position-dependent weights:
+The spec (`bw_modified.pdf`) adds clip evidence to the Q-function and calls for
+EM updates of πL, πR, ϵL, ϵR (zero-inflation and clip rates) in the M-step.
 
-```
-γ_final(t,i) = w_n(t) × γ_neutral(t,i) + w_c(t) × γ_clipped(t,i)
-```
+### New E-step accumulators
+`zinbLeftHist[nStates][count]` and `zinbRightHist[nStates][count]` accumulate
+γ_t(i)-weighted left/right clip counts per state alongside the existing `zinbClipHist`.
 
-Where weights depend on local clipping evidence.
+### New M-step block
+After the combined ZINB update, an `updateDirZINB` lambda runs NR (via `UpdateZINBPhi`)
+for each direction, updates π and mean from the diploid-state histogram, and recomputes
+PnL/PclL/PnR/PclR with the refreshed parameters for the next BW iteration.
 
-### Implementation Tasks
-- [ ] Implement dual forward-backward passes
-- [ ] Add posterior combination logic
-- [ ] Update expected sufficient statistics calculation
-- [ ] Modify `BaumWelchEOnChrom()` and `BaumWelchM()`
+### HG002 chr22 convergence (2 BW iterations before early-stop)
+| Iter | clipPi | clipMean | clipPhi | πL | μL | φL | πR | μR | φR |
+|------|--------|----------|---------|-----|----|----|-----|----|----|
+| 1 | 0.9986 | 3.37 | 0.845 | 0.9993 | 2.92 | 1.043 | 0.9993 | 3.44 | 0.829 |
+| 2 | 0.9987 | 2.98 | 0.985 | 0.9993 | 2.61 | 1.188 | 0.9993 | 3.04 | 0.998 |
 
-### Files to Modify
-- `src/hmmcnc.cpp` - Core algorithm changes
-- `include/hmcnc.h` - Updated function signatures
+### Call counts (effectively unchanged — coverage still dominates)
+
+| Sample | DEL | DUP | Total |
+|--------|-----|-----|-------|
+| HG002  | 175 | 353 | 528   |
+| HG003  | 160 | 306 | 466   |
+| HG004  | 183 | 322 | 505   |
+
+**Files modified:**
+- `src/hmmcnc.cpp` — `ThreadInfo` L/R hist pointers, E-step directional histogram accumulation, directional ZINB M-step + PnL/PclL/PnR/PclR recompute
 
 ---
 

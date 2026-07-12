@@ -1,0 +1,100 @@
+⏺ Now I have the full picture. Here's the complete audit:
+
+  ---
+  Math Audit: lepsi, epsi, beta, and the CN=3 penalty
+
+  1. Emission model (LgNegBinom)
+
+  For CN state i, haploid mean μ = mean/2, haploid variance σ² = var/2:
+
+  CN=i:  mean_i = i * μ,   var_i = i * σ²
+  NB parameters:  p = mean_i / var_i = μ/σ² (constant across all CN)
+                  r = mean_i * p / (1-p)    (scales linearly with CN)
+
+  The key property: variance scales linearly with CN, not with CN². This is a mean-variance assumption where the NB dispersion parameter r is proportional
+  to CN. This is reasonable for read depth but has a consequence: the NB distribution for CN=3 has mean 3μ and variance 3σ², while CN=1 has mean μ and
+  variance σ². Both are equally dispersed (same coefficient of variation), so they're symmetric in a log-scale sense.
+
+  Why CN=3 is harder to detect than CN=1: The separation between CN=2 and CN=3 in coverage units is only μ/2 above the CN=2 mean of 2μ, while CN=1 is μ
+  below CN=2. Same absolute gap in one direction vs. half in the other. More precisely:
+
+  - CN=2 mean: 2μ, CN=3 mean: 3μ → midpoint 2.5μ, separation = μ
+  - CN=2 mean: 2μ, CN=1 mean: μ   → midpoint 1.5μ, separation = μ
+
+  The absolute separation at the midpoint is the same (μ), but the NB variance is larger at CN=3 (3σ²) than at CN=1 (σ²), so the distributions overlap more
+  for CN=2 vs CN=3 than for CN=2 vs CN=1. This is what lepsi23_nb captures:
+
+  lepsi23_nb = log P(cov=3μ/2 | NB(mean=2μ, var=2σ²))
+             - log P(cov=3μ/2 | NB(mean=3μ, var=3σ²))
+
+  This is negative (CN=2 explains the midpoint better than CN=3 does — you'd see 3μ/2 more often under CN=2). Typical value: -0.87 (HG002).
+
+  lepsi21_nb = log P(cov=μ/2 | NB(mean=2μ, var=2σ²))
+             - log P(cov=μ/2 | NB(mean=μ,  var=σ²))
+
+  Typical value: -1.07 (HG002). More negative = CN=1 midpoint is more diagnostic.
+
+  So yes: CN=3 is penalized relative to CN=1 because its NB distribution is wider (higher variance), making the CN=2/CN=3 boundary less sharp than
+  CN=2/CN=1.
+
+  2. beta_new computation and the factor-of-100
+
+  const double beta_new = 100 * lepsi23_nb;   // e.g. -87
+  const double clipBeta = 100 * lepsi23_nb;   // same
+
+  The intent: beta_new represents the log-likelihood evidence needed to transition out of CN=2 — scaled to ~100 bins of signal at the midpoint (a rough
+  estimate of minimum event length to call). Since lepsi23_nb ≈ -0.87 per bin at the hardest midpoint, 100 bins gives a transition penalty of -87. The
+  asymmetry (using lepsi23_nb rather than lepsi21_nb) deliberately uses the harder direction — CN=3 detection — so that short spurious coverage bumps don't
+  trigger duplication calls.
+
+  Note beta1 = scaler1 * epsi12 and beta_nb1 = scaler1 * lepsi21_nb are computed but never used (see step 3 below).
+
+  3. InitParams — the critical disconnect
+
+  beta_new and clipBeta are passed to InitParams, which computes Diag0/Diag1/Diag2 from them. But every matrix assignment uses hardcoded constants instead:
+
+  const double large = -30;
+  const double offDiagE = log(exp(-30) / 6) ≈ -31.79   // off-diagonal neutral
+  const double DiagE   = log(1 - exp(-30)) ≈ -1e-9     // diagonal neutral (≈0)
+
+  // For "clipped" transitions, uses the diag/offDiag passed in:
+  //   diag    = log(1 - exp(-5)) ≈ -0.0067
+  //   offDiag = log(exp(-5) / 6) ≈ -6.79
+
+  The neutral covCovTransP uses DiagE and offDiagE — essentially a flat prior that forces the HMM to stay in any state with near-certainty (e^{-30}
+  probability of any transition). The clipCovCovTransP uses the passed diag/offDiag with small=-5, which is the only matrix that has any real structural
+  information — and it uses the small=-5 hardcode, not beta_new.
+
+  The computed beta_new = -87 and the beta-derived Diag0/Diag1/Diag2 values are entirely dead code — they're computed but the assignments that would use
+  them are all commented out.
+
+  4. Consequence
+
+  The actual transition matrix passed to Baum-Welch training is:
+
+  - covCovTransP: near-uniform (all transitions equally improbable at e^{-30}) — this is a nearly flat initialization that lets Baum-Welch estimate
+  everything from scratch
+  - clipCovCovTransP: slightly informative with small=-5 diagonal bias
+
+  The CN=3 disadvantage in the final calls comes entirely from the emission model (wider NB distribution → lower peak likelihood → harder to exceed the
+  transition penalty), not from an asymmetric transition prior. After Baum-Welch runs, the learned transitions should correct for this — but the initial
+  calibration from beta_new is never used.
+
+  5. The real fix
+
+  If you want the transition initialization to reflect the actual difficulty of calling CN=3 vs CN=1, the Diag1 (neutral state) entry should use beta_new =
+  100 * lepsi23_nb, and Diag0 for CN=1 exits should use 100 * lepsi21_nb. Currently all the lines that would do this are commented out:
+
+  // covCovTransP[i][j] = Diag1;   // this uses beta-derived value — commented out
+  // covCovTransP[i][j] = offDiagE; // epsi12 — commented out
+  // covCovTransP[i][j] = epsi23;   // commented out
+
+  The question is whether to uncomment these and wire in the asymmetric initialization, or whether the current flat initialization + Baum-Welch training is
+  good enough for chr22-only runs.
+
+  ---
+  Summary: CN=3 is intrinsically harder to call because the NB emission variance scales with CN, making the CN=2/CN=3 boundary fuzzier than CN=2/CN=1.
+  lepsi23_nb ≈ -0.87 vs lepsi21_nb ≈ -1.07 quantifies this. The computed beta_new correctly accounts for this asymmetry, but it's dead code — InitParams
+  doesn't use it. The flat initialization puts both directions on equal footing and relies on Baum-Welch to learn the difference.
+
+  Do you want to uncomment and wire in the asymmetric transition initialization to give CN=3 calls a harder prior from the start

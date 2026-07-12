@@ -1,0 +1,50 @@
+FROM ubuntu:20.04
+
+# Set environment variables
+ENV CONDA_BASE=/opt/conda
+
+# Install system dependencies
+RUN yum install -y wget
+
+# Download and install Miniconda
+RUN DL_DIR=$(mktemp -d) && \
+    cd $DL_DIR && \
+    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
+    bash Miniconda3-latest-Linux-x86_64.sh -b -p $CONDA_BASE && \
+    cd - && \
+    rm -rf $DL_DIR && \
+    unset DL_DIR
+
+# Set Miniconda environment
+ENV PATH $CONDA_BASE/bin:$PATH
+
+# Initialize and configure conda
+RUN conda init --system --yes && \
+    conda config --system --set auto_activate_base False && \
+    conda config --system --remove channels defaults && \
+    conda config --system --add channels bioconda && \
+    conda config --system --add channels conda-forge && \
+    conda config --system --set channel_priority strict && \
+    conda update -n base conda --yes
+
+# Create and activate a virtual environment
+RUN conda create -n henv --yes && \
+    echo "conda activate henv" >> ~/.bashrc
+SHELL ["conda", "run", "-n", "henv", "/bin/bash", "-c"]
+
+# Install dependencies
+RUN conda install -c conda-forge gxx boost --yes
+RUN conda install -c bioconda bedtools samtools htslib tabix --yes
+
+# Copy source code files
+COPY hmmcnc.cpp .
+COPY hmcnc_io.cpp .
+COPY main.cpp .
+
+# Compile the C++ program
+RUN g++ -c -g2 -I $CONDA_PREFIX/include hmmcnc.cpp -o hmmcnc.o && \
+    g++ -c -g2 -I $CONDA_PREFIX/include hmcnc_io.cpp -o hmcnc_io.o && \
+    g++ -g2 -I $CONDA_PREFIX/include main.cpp hmmcnc.o hmcnc_io.o -o hmcnc -L $CONDA_PREFIX/lib -lhts -lpthread -ffast-math -Wl,-rpath-link=$CONDA_PREFIX/lib
+
+# Set the command to run the program
+CMD ["./hmcnc"]

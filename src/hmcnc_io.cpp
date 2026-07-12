@@ -56,6 +56,54 @@ void ReadCoverage(const std::string &covFileName,
   ReadCoverage(covFile, contigNames, covBins);
 }
 
+void ReadExcludeRegions(const std::string &fileName,
+                        const std::vector<std::string> &contigNames,
+                        std::vector<std::vector<bool>> &excludedBins,
+                        int binSize) {
+  excludedBins.clear();
+  excludedBins.resize(contigNames.size());
+  std::map<std::string, size_t> contigToIndex;
+  for (size_t i = 0; i < contigNames.size(); ++i) {
+    contigToIndex[contigNames[i]] = i;
+  }
+
+  std::ifstream inFile{fileName.c_str()};
+  if (!inFile.good()) {
+    std::cerr << "ERROR: Could not open exclude regions file " << fileName << '\n';
+    exit(EXIT_FAILURE);
+  }
+
+  std::string line;
+  std::vector<std::string> fields;
+  while (std::getline(inFile, line)) {
+    if (line.empty() || line[0] == '#') continue;
+    fields.clear();
+    boost::split(fields, line, boost::is_any_of("\t "));
+    if (fields.size() < 3) continue;
+
+    const std::string &chrom = fields[0];
+    auto it = contigToIndex.find(chrom);
+    if (it == contigToIndex.end()) continue;
+
+    const size_t cIdx = it->second;
+    int start = std::stoi(fields[1]);
+    int end = std::stoi(fields[2]);
+
+    int startBin = start / binSize;
+    int endBin = end / binSize; // Not inclusive for the end bin usually, but to be safe we include overlap
+    if (end % binSize != 0) {
+        endBin++;
+    }
+
+    if (excludedBins[cIdx].size() <= endBin) {
+      excludedBins[cIdx].resize(endBin + 1, false);
+    }
+    for (int b = startBin; b < endBin; ++b) {
+      excludedBins[cIdx][b] = true;
+    }
+  }
+}
+
 void ReadFai(std::istream &faiIn,
              std::vector<std::string> &contigNames,
              std::vector<int> &contigLengths) {
@@ -423,14 +471,23 @@ void WriteBed( const std::vector<std::vector<Interval>> &intv,
       }
       const int cnLength = intv[c][i].end - intv[c][i].start;
 
-      out << contigNames[c] << '\t'
-          << intv[c][i].start << '\t'
-          << intv[c][i].end << '\t'
-          << intv[c][i].copyNumber << '\t'
-          << intv[c][i].averageCoverage << '\t'
-          << cnLength <<'\t'
-          << intv[c][i].pVal << '\t'
-          << intv[c][i].filter<< '\n';
+      // Columns 1–8: unchanged (required by filter_finalize_call.sh).
+      out << contigNames[c]           << '\t'   // col1  chrom
+          << intv[c][i].start         << '\t'   // col2  start
+          << intv[c][i].end           << '\t'   // col3  end
+          << intv[c][i].copyNumber    << '\t'   // col4  domCN (block label)
+          << intv[c][i].averageCoverage << '\t' // col5  mean coverage
+          << cnLength                 << '\t'   // col6  block length bp
+          << intv[c][i].pVal          << '\t'   // col7  log-posterior
+          << intv[c][i].filter        << '\t'   // col8  PASS/FAIL
+      // Columns 9–15: composite block metrics (NEW).
+          << intv[c][i].domCN         << '\t'   // col9  plurality CN
+          << intv[c][i].lwCN          << '\t'   // col10 length-weighted mean CN
+          << intv[c][i].medianCN      << '\t'   // col11 bin-weighted median CN
+          << intv[c][i].peakCN        << '\t'   // col12 maximum CN in block
+          << intv[c][i].nSegments     << '\t'   // col13 raw HMM segments merged
+          << intv[c][i].pctNonDiploid << '\t'   // col14 fraction span non-diploid
+          << intv[c][i].meanPosterior << '\n';  // col15 length-weighted log-posterior
     }
   }
 }

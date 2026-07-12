@@ -25,6 +25,17 @@ struct Interval {
   int distanceToEndClip;
   int nFrontClip;
   int nEndClip;
+
+  // Composite block metrics (populated by MergeConsecutiveBlocks).
+  // For single-segment intervals these are trivially equal to the raw HMM values.
+  int    domCN         = -1;   // plurality CN: state with longest cumulative span
+  double lwCN          = 0.0;  // length-weighted mean CN = Σ(len_i × CN_i) / Σlen_i
+  double medianCN      = 0.0;  // bin-length-weighted median CN
+  int    peakCN        = -1;   // maximum CN in any constituent segment
+  int    nSegments     = 1;    // number of raw HMM segments merged into this block
+  double pctNonDiploid = 1.0;  // fraction of block span with CN ≠ 2
+  double meanPosterior = 0.0;  // length-weighted avg log-posterior (mirrors pVal for single segs)
+
   Interval();
   Interval(int s, int e, int cn, float avg, double p);
 };
@@ -63,6 +74,7 @@ struct Parameters {
   std::string outputPrefix;  // --output-all: prefix for all output files
   std::string useChrom;
   std::string hmmChrom;
+  std::string excludeRegionsFile;
 
   int nproc = 4;
   MODEL_TYPE model = NEG_BINOM;
@@ -80,6 +92,23 @@ struct Parameters {
   // non-diploid states.  1.0 = full penalty (100 bins of boundary evidence
   // required); 0.5 = 200 bins; 0.0 = no penalty.
   double epsiWeight = 1.0;
+
+  // Minimum soft-clip length counted as a clipping event.
+  int minClipLength = 500;
+
+  // DEPRECATED: clip-weight amplifier disabled. Was a compensating amplifier for clip
+  // prior suppression; both removed together (see hmmcnc.cpp amplify block comment).
+  double clipWeight = 1.0;
+
+  // Expected breakpoints for clip prior. 0 = no prior (uniform; pure ZINB LLR).
+  // >0: Bayesian prior PClipped = log(n/n_bins). Default 0 (no prior).
+  double clipPrior = 0.0;
+
+  // Post-HMM composite block merging.
+  // Adjacent non-diploid segments are merged into one composite block when separated
+  // by a CN=2 gap of at most this many base pairs. 0 = disabled (raw HMM segments).
+  // Default 100 bp = 1 bin (conservative: only bridges single noisy diploid bins).
+  int mergeBridge = 100;
 
   CLI::App CLI;
   std::string modelString;
@@ -189,6 +218,8 @@ void intersectDelCall( std::vector<Interval> &mergedIntervals, std::vector<Inter
 
 void mergeNaiveIntervals(std::vector<Interval> &intervals, std::vector<Interval> &mergedIntervals, std::string contig);
 
+void MergeConsecutiveBlocks(std::vector<Interval> &intervals, int maxBridgeBp);
+
 void NaiveCaller(std::vector<int> &covBins, std::vector<Interval> &NaiveIntervals, double mean );
 
 void StorePosteriorMaxIntervals(const std::vector<int> &cov,
@@ -223,6 +254,12 @@ void ReadCoverage(const std::string &covFileName,
 void ReadFai(std::istream &faiFile,
              std::vector<std::string> &contigNames,
              std::vector<int> &contigLengths);
+
+void ReadExcludeRegions(const std::string &fileName,
+                        const std::vector<std::string> &contigNames,
+                        std::vector<std::vector<bool>> &excludedBins,
+                        int binSize = 100);
+
 void ReadFai(const std::string faiFileName,
              std::vector<std::string> &contigNames,
              std::vector<int> &contigLengths);

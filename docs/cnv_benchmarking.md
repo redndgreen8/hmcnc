@@ -5,6 +5,7 @@
 Benchmark a CNV/SV caller against two orthogonal truth sets:
 - **Platinum Pedigree** (NA12878, CEPH-1463) — pedigree-validated, long-read truth set
 - **GIAB** (HG002/HG003/HG004, Ashkenazim trio) — multi-technology integrated truth set
+- **Cancer GIAB** (HG008, Pancreatic Cancer) — somatic structural variant and CNV benchmarks
 
 Reference genome: **GRCh38**
 
@@ -111,6 +112,18 @@ curl -O --output-dir truth/giab/hg004 \
   ${BASE}/HG004_NA24143_mother/NISTv4.2.1/GRCh38/HG004_GRCh38_1_22_v4.2.1_benchmark.vcf.gz.tbi
 curl -O --output-dir truth/giab/hg004 \
   ${BASE}/HG004_NA24143_mother/NISTv4.2.1/GRCh38/HG004_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed
+```
+
+### 1d. Cancer GIAB — HG008 Somatic SV/CNV Benchmarks (v0.5)
+
+```bash
+mkdir -p truth/giab/hg008
+
+FTPDIR=https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/data_somatic/HG008/Liss_lab/analysis/NIST_HG008-T_somatic-stvar-CNV_DraftBenchmark_V0.5-20260318
+
+# Download somatic SV/CNV draft benchmark V0.5
+curl -O --output-dir truth/giab/hg008 ${FTPDIR}/HG008-T_somatic-stvar-CNV_DraftBenchmark_V0.5.vcf.gz
+curl -O --output-dir truth/giab/hg008 ${FTPDIR}/HG008-T_somatic-stvar-CNV_DraftBenchmark_V0.5.vcf.gz.tbi
 ```
 
 ---
@@ -361,7 +374,8 @@ cnv-benchmark/
 │       │   ├── HG002_SVs_Tier1_v0.6.bed
 │       │   └── HG002_CNV_truth.vcf.gz        # filtered DEL/DUP
 │       ├── hg003/
-│       └── hg004/
+│       ├── hg004/
+│       └── hg008/
 ├── bams/
 │   ├── platinum_pedigree/
 │   │   └── NA12878-cell-line-revio.GRCh38.haplotagged.bam
@@ -384,6 +398,23 @@ cnv-benchmark/
 - Kronenberg et al. (2025). *The Platinum Pedigree: a long-read benchmark for genetic variants.* Nature Methods 22, 1669–1676. https://doi.org/10.1038/s41592-025-02750-y
 - Zook et al. (2020). *A robust benchmark for germline structural variant detection.* Nature Biotechnology. https://doi.org/10.1038/s41587-020-0538-8
 - Zook et al. (2021). *Benchmarking challenging small variants with linked and long reads.* Cell Genomics.
+- Genome in a Bottle Consortium (2026). *A complete human pancreatic cancer genome.* bioRxiv. https://doi.org/10.64898/2026.05.01.722316
 - Data: `s3://platinum-pedigree-data/` (open, no credentials needed)
 - Data: `ftp://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/`
+- Data: NHGRI AnVIL Project (for HGSVC, T2T/CHM13, and cancer long reads) - `https://anvilproject.org/`
+- Data: The Cancer Genome Atlas (TCGA) - `https://gdc.cancer.gov/`
+- Data: Human Pangenome Reference Consortium (HPRC) - `https://humanpangenome.org/`
 - GitHub: https://github.com/Platinum-Pedigree-Consortium/Platinum-Pedigree-Datasets
+
+### Additional Datasets and Open Registries
+- **1KG-ONT-VIENNA panel:** Medium coverage ONT sequencing data for 1,019 samples from the 1000 Genomes Project collection, including SVs and haplotype context.
+- **Genome in a Bottle on AWS (`giab`):** Full NIST reference genomes mirrored on AWS.
+- **1000 Genomes Phase 3 Reanalysis with DRAGEN (`ilmn-dragen-1kgp`):** Includes high-confidence small variant, CNV, and SV calls on 1KGP samples.
+- **GATK Structural Variation (SV) Data (`gatk-sv-data`):** Data needed to run Broad's SV discovery pipeline for Illumina short-read WGS data.
+- **Epigenomes of the HPRC Release 2 (`hprc-epigenome`):** High-quality phased genome assemblies from over 200 individuals with comprehensive functional epigenomic data.
+- **Allen Ivy Glioblastoma Atlas:** Gene expression and tissue imaging for glioblastoma human brain tumors.
+- **Beat Acute Myeloid Leukemia (AML) 1.0:** Collaborative research sequencing data for AML.
+- **Clinical Trial Sequencing Project - Diffuse Large B-Cell Lymphoma:** Recurrent genetic alterations (including deletions and amplifications/CNVs) in DLBCL.
+- **Garvan Institute Long Read Sequencing Benchmark Data (`gtgseq`):** A benchmark resource of GIAB samples (HG001, HG002) sequenced heavily on Oxford Nanopore PromethION.
+- **Somatic Mosaicism across Human Tissues (`smaht`):** NIH consortium characterizing somatic variation (mosaicism) in normal tissues, heavily utilizing high-accuracy PacBio HiFi data.
+- **Nanopore Reference Human Genome (`nanopore`):** The original reference standard human genome (GM12878) using MinION nanopore sequencing.
