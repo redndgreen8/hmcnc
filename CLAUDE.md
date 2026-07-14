@@ -159,35 +159,55 @@ meson test -v
 - Phase 2: Directional clipping — separate L/R clip bins + ZINB params; results in `results/phase2/`
 - Phase 3: Newton-Raphson dispersion — `UpdateZINBPhi` in BW M-step; results in `results/phase3/`
 - Phase 4: Directional transition modification — direction-aware clip posteriors in F-B and BW E-step; results in `results/phase4/`
+- Phase 5: Directional ZINB M-step — separate BW EM updates for πL/μL/φL and πR/μR/φR; results in `results/phase5/`
+- Phase 6: Post-processing & Filtering — composite block merging across CN=2 gaps (`MergeConsecutiveBlocks`), comprehensive block metrics (`lwCN`, `domCN`, `peakCN`), and exclusion region BED pre-filtering (`--exclude-regions`).
 
-**Phase ZINB Parameters (BW-updated, chr22):**
-- MOM init: clipPi ≈ 0.997, clipPhi ≈ 0.29
-- After NR in BW loop: clipPhi converges to ~0.85–1.3 (tighter, γ-weighted)
-- Left clip: pi ≈ 0.999, phi ≈ 0.37; Right clip: pi ≈ 0.999, phi ≈ 0.26 (MOM estimates)
+**Phase ZINB Parameters (BW-updated, chr22, Phase 5):**
+- Combined: clipPi ≈ 0.9987, clipMean ≈ 2.98, clipPhi ≈ 0.985 (after 2 BW iters)
+- Left clip: pi ≈ 0.9993, mean ≈ 2.61, phi ≈ 1.188 (now BW-updated, was MOM)
+- Right clip: pi ≈ 0.9993, mean ≈ 3.04, phi ≈ 0.998 (now BW-updated, was MOM)
 
 **Directional Convention:**
-- Left clips (frontClip, S at CIGAR start): CN-decreasing transitions (j < i)
-- Right clips (backClip, S at CIGAR end): CN-increasing transitions (j > i)
+- Left clips (frontClip/leading H/S, recorded at alignment `startpos`): CN-increasing transitions (j > i)
+  - Marks the right-hand boundary of a CNV: deletion→normal (1→2), normal→duplication (2→3)
+- Right clips (backClip/trailing H/S, recorded at alignment `endpos`): CN-decreasing transitions (j < i)
+  - Marks the left-hand boundary of a CNV: normal→deletion (2→1), duplication→normal (3→2)
 - Self-transitions (j == i): combined Pn/Pcl
+
+**Clip Source — Supplementary vs Primary:**
+Modern long-read aligners (minimap2, pbmm2) emit **supplementary alignments** (flag `0x800`,
+BAM_FSUPPLEMENTARY) at SV breakpoints rather than primary soft-clips. The read is split into a
+primary alignment and one or more supplementary alignments, with H/S clipping at the split points.
+Primary reads in those regions align cleanly (no long soft-clip), so counting primary soft-clips
+misses the true breakpoint signal and picks up pericentromeric noise instead.
+
+The parser therefore collects both sources:
+- **Supplementary reads** — leading H/S → `leftClipBins`; trailing H/S → `rightClipBins`.
+  This is the authoritative SV signal for minimap2/pbmm2 data.
+- **Primary reads** — leading S → `leftClipBins`; trailing S → `rightClipBins`.
+  Retained for completeness; dominated by noise in minimap2 alignments but may carry signal
+  for short-read aligners (bwa-mem2) that emit primary soft-clips at breakpoints.
+
+Both contribute to the same `clipBins`/`leftClipBins`/`rightClipBins` arrays.
 
 **Benchmarking Pipeline:**
 ```bash
 # Run samples for a given phase (no truth VCFs needed):
 snakemake -s benchmarks/benchmark.smk --configfile benchmarks/config.yaml \
-  --config phase=phase4 -j3 calls
+  --config phase=phase6 -j3 calls
 
-# With custom epsi-weight:
+# With custom exclude regions:
 snakemake -s benchmarks/benchmark.smk --configfile benchmarks/config.yaml \
-  --config phase=phase4 extra_args="--epsi-weight 0.5" -j3 filter
+  --config phase=phase6 extra_args="--exclude-regions HMM/annotation/hg38.region_to_EXCLUDE.bed" -j3 filter
 
 # Full benchmark with truvari (needs benchmarks/truth/<SAMPLE>.chr22.truth.vcf.gz):
 snakemake -s benchmarks/benchmark.smk --configfile benchmarks/config.yaml \
-  --config phase=phase4 -j3 all
+  --config phase=phase6 -j3 bench
 ```
 
 **Note:** hg38 chr22 reference is at `/Users/red/repos/MethSmoothEval/data/annotations/hg38.chr22.fa`.
 The symlinks in `data/chr22_test/` are broken. Reference goes **last** in the command line.
 
-**Next Phase:** Phase 5 — dual forward-backward passes with clip-evidence posteriors (`bw_modified.pdf`)
+**Next Phase:** Phase 7 — integration and validation (GIAB truth VCFs needed in `benchmarks/truth/`)
 
 See `docs/IMPLEMENTATION_ROADMAP.md` for full roadmap.
