@@ -301,7 +301,23 @@ PnL/PclL/PnR/PclR with the refreshed parameters for the next BW iteration.
 
 ---
 
-## Phase 6: Integration & Validation
+## Phase 6: Post-processing & Filtering [COMPLETED]
+
+### Achievements
+1. **Composite Call Merging (`MergeConsecutiveBlocks`)**:
+   - Bridges short CN=2 gaps within non-diploid regions.
+   - Preserves continuous composite events while ignoring spurious short diploid interruptions.
+2. **Comprehensive Block Metrics**:
+   - `domCN`: Majority CN state for the event block.
+   - `lwCN`: Length-weighted average CN for characterization of varying-CN blocks.
+   - `peakCN`: Peak absolute copy number.
+   - `pctNonDiploid`: Cleanliness metric for filtering out noisy spanned regions.
+3. **Exclusion Regions Pre-filter (`--exclude-regions`)**:
+   - Skips alignment extraction and avoids computing global mean/var over repeat, centromeric, and telomeric regions to ensure more stable parameter bounds during HMM training.
+
+---
+
+## Phase 7: Integration & Validation
 
 ### Testing
 - [ ] End-to-end testing on HG002/HG003/HG004 chr22
