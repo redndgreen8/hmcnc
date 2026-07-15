@@ -44,7 +44,7 @@ COPY main.cpp .
 # Compile the C++ program
 RUN g++ -c -g2 -I $CONDA_PREFIX/include hmmcnc.cpp -o hmmcnc.o && \
     g++ -c -g2 -I $CONDA_PREFIX/include hmcnc_io.cpp -o hmcnc_io.o && \
-    g++ -g2 -I $CONDA_PREFIX/include main.cpp hmmcnc.o hmcnc_io.o -o hmcnc -L $CONDA_PREFIX/lib -lhts -lpthread -ffast-math -Wl,-rpath-link=$CONDA_PREFIX/lib
+    g++ -g2 -I $CONDA_PREFIX/include main.cpp hmmcnc.o hmcnc_io.o -o hmcnc -L $CONDA_PREFIX/lib -lhts -lpthread -ffast-math -Wl,-rpath=$CONDA_PREFIX/lib
 
 # Set the command to run the program
 CMD ["./hmcnc"]
