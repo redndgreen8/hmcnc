@@ -46,7 +46,7 @@ const int MIN_SV_LENGTH=1000;
 const int MIN_DEL_LENGTH=5000;
 const int MIN_MAPQ=10;
 const int BIN_LENGTH=100;
-const int MIN_CLIP_LENGTH=500;
+const int MIN_CLIP_LENGTH = 500;
 const int MIN_CONTIG_SIZE=1000000;
 const float MISMAP_RATE=0.01;
 const double minNeg=-1*numeric_limits<double>::epsilon();
@@ -270,10 +270,16 @@ public:
   vector<vector<int>> *clipBins;
   vector<vector<int>> *leftClipBins;
   vector<vector<int>> *rightClipBins;
+  vector<vector<bool>> *excludedBins;
   vector<vector<double>> *cl, *n;
-  vector<vector<double>> *clL, *nL;   // directional: left-clip posteriors
-  vector<vector<double>> *clR, *nR;   // directional: right-clip posteriors
-  vector<vector<double>> *zinbClipHist; // [nStates][count] gamma-weighted histogram
+  vector<vector<double>> *clL, *nL; // directional: left-clip posteriors
+  vector<vector<double>> *clR, *nR; // directional: right-clip posteriors
+  vector<vector<double>>
+      *zinbClipHist; // [nStates][count] gamma-weighted combined histogram
+  vector<vector<double>>
+      *zinbLeftHist; // [nStates][count] gamma-weighted left-clip histogram
+  vector<vector<double>>
+      *zinbRightHist; // [nStates][count] gamma-weighted right-clip histogram
   int zinbClipMax = 256;
 
   vector<vector<SNV>> *snvs;
@@ -297,6 +303,8 @@ public:
   vector<int> *totalReads;
   vector<long> *totalBases;
   vector<double> *averageCoverage;
+  int mergeBridge = 100; // from params.mergeBridge; used to init block metrics
+                         // in training path
 };
 
 static void printModel(const vector<vector<double>> &transP, ostream *strm)
@@ -780,9 +788,10 @@ double ForwardBackwards(const vector<double> &startP,
   return finalCol;
 }
 
-// Directional variant: uses left-clip posteriors (PnL/PclL) for CN-decreasing transitions,
-// right-clip posteriors (PnR/PclR) for CN-increasing transitions, and combined (Pn/Pcl)
-// for self-transitions.  State index == copy number (0..6).
+// Directional variant: uses left-clip posteriors (PnL/PclL) for CN-increasing
+// transitions, right-clip posteriors (PnR/PclR) for CN-decreasing transitions,
+// and combined (Pn/Pcl) for self-transitions.  State index == copy number
+// (0..6).
 double ForwardBackwards(const vector<double> &startP,
                         const vector<vector<double>> &covCovTransP,
                         const vector<vector<double>> &clipCovCovTransP,
@@ -812,11 +821,17 @@ double ForwardBackwards(const vector<double> &startP,
   }
 
   // Helper: select the correct clip posterior pair for transition i→j
-  auto clipPair = [&](int i, int j, int k,
-                      double &pN, double &pCl) {
-    if      (j < i) { pN = PnL[k]; pCl = PclL[k]; }
-    else if (j > i) { pN = PnR[k]; pCl = PclR[k]; }
-    else            { pN = Pn[k];  pCl = Pcl[k];  }
+  auto clipPair = [&](int i, int j, int k, double &pN, double &pCl) {
+    if (j > i) {
+      pN = PnL[k];
+      pCl = PclL[k];
+    } else if (j < i) {
+      pN = PnR[k];
+      pCl = PclR[k];
+    } else {
+      pN = Pn[k];
+      pCl = Pcl[k];
+    }
   };
 
   double clipSum = 0;
@@ -825,7 +840,7 @@ double ForwardBackwards(const vector<double> &startP,
       double colSum = 0;
       for (int j = 0; j < nCovStates; j++) {
         double pN, pCl;
-        clipPair(j, i, k, pN, pCl);
+        clipPair(i, j, k, pN, pCl);
         clipSum = PairSumOfLogP(covCovTransP[i][j] + pN, clipCovCovTransP[i][j] + pCl);
         colSum  = PairSumOfLogP(colSum, f[j][k] + clipSum);
       }
@@ -972,11 +987,11 @@ double BaumWelchEOnChrom(const vector<double> &startP,
   std::cerr<<"\npxNoclip: "<<pxNoclip<<"\npxClip: "<<pxClip<<endl;
 
   // Direction-aware clip posterior selection: decreasing CN → left; increasing → right.
-  auto dirPn  = [&](int i, int j, int k) -> double {
-    return (j < i) ? PnL[k] : (j > i) ? PnR[k] : Pn[k];
+  auto dirPn = [&](int i, int j, int k) -> double {
+    return (j > i) ? PnL[k] : (j < i) ? PnR[k] : Pn[k];
   };
   auto dirPcl = [&](int i, int j, int k) -> double {
-    return (j < i) ? PclL[k] : (j > i) ? PclR[k] : Pcl[k];
+    return (j > i) ? PclL[k] : (j < i) ? PclR[k] : Pcl[k];
   };
 
   for (int k = 1; k < nObs - 1; k++) {
@@ -1180,6 +1195,144 @@ void mergeNaiveIntervals(vector<Interval> &intervals, vector<Interval> &mergedIn
 }
 
 
+
+// MergeConsecutiveBlocks: post-HMM pass that forms composite non-diploid
+// blocks.
+//
+// Design:
+//   CN=2 is the only true block boundary. Any contiguous run of non-CN=2 HMM
+//   segments forms one composite block, even if CN varies within it (e.g.
+//   3→4→5→4→3 is one block). Short CN=2 gaps (≤ maxBridgeBp bp) between two
+//   non-diploid segments are bridged: the gap is absorbed into the block.
+//
+//   With maxBridgeBp == 0 this function is still called (to initialise the new
+//   metric fields) but no bridging occurs and segments are emitted as-is.
+//
+// New fields set on each output Interval:
+//   copyNumber   — updated to domCN (preserves col4 semantics for downstream
+//   awk filters) pVal         — length-weighted average log-posterior domCN —
+//   CN state with the largest cumulative span (tie → furthest from 2) lwCN —
+//   Σ(len_i × CN_i) / total_len medianCN     — bin-length-weighted
+//   50th-percentile CN peakCN       — max CN observed in any constituent
+//   segment nSegments    — number of raw HMM segments merged into this block
+//   pctNonDiploid— fraction of block span with CN ≠ 2
+//   meanPosterior— length-weighted avg log-posterior (equals pVal)
+//
+void MergeConsecutiveBlocks(vector<Interval> &ivs, int maxBridgeBp) {
+
+  // Helper: given an accumulator interval and its constituent segments, compute
+  // and set all composite block metrics.
+  struct Seg {
+    int start, end, cn;
+    double pval;
+  };
+
+  auto computeMetrics = [](Interval &blk, const vector<Seg> &ss) {
+    const long totalLen = blk.end - blk.start;
+    if (totalLen <= 0)
+      return;
+
+    long nonDipLen = 0;
+    long wCNsum = 0;
+    double wPsum = 0.0;
+    int peakCN = 0;
+    map<int, long> cnSpan;          // CN → cumulative span in bp
+    vector<pair<int, long>> cnLens; // (CN, len) for median
+
+    for (const auto &s : ss) {
+      const long len = s.end - s.start;
+      if (len <= 0)
+        continue;
+      cnSpan[s.cn] += len;
+      cnLens.push_back({s.cn, len});
+      wCNsum += static_cast<long>(s.cn) * len;
+      wPsum += s.pval * len;
+      if (s.cn != 2)
+        nonDipLen += len;
+      if (s.cn > peakCN)
+        peakCN = s.cn;
+    }
+
+    // domCN: largest cumulative span; tie-break → furthest from diploid
+    int domCN = 2;
+    long domLen = 0;
+    for (const auto &kv : cnSpan) {
+      const int cn = kv.first;
+      const long span = kv.second;
+      if (span > domLen || (span == domLen && abs(cn - 2) > abs(domCN - 2))) {
+        domCN = cn;
+        domLen = span;
+      }
+    }
+
+    // medianCN: bin-length-weighted median (sort by CN, walk until cumulative ≥
+    // half)
+    sort(cnLens.begin(), cnLens.end());
+    const long half = totalLen / 2;
+    long acc = 0;
+    double medCN = static_cast<double>(cnLens[0].first);
+    for (const auto &kv : cnLens) {
+      acc += kv.second;
+      if (acc >= half) {
+        medCN = static_cast<double>(kv.first);
+        break;
+      }
+    }
+
+    blk.domCN = domCN;
+    blk.lwCN = static_cast<double>(wCNsum) / totalLen;
+    blk.medianCN = medCN;
+    blk.peakCN = peakCN;
+    blk.nSegments = static_cast<int>(ss.size());
+    blk.pctNonDiploid = static_cast<double>(nonDipLen) / totalLen;
+    blk.meanPosterior = wPsum / totalLen;
+    // Update copyNumber so downstream $4 filters (awk '$4>2', '$4<2') remain
+    // correct.
+    blk.copyNumber = domCN;
+    blk.pVal = blk.meanPosterior;
+  };
+
+  if (ivs.empty())
+    return;
+
+  vector<Interval> out;
+  out.reserve(ivs.size());
+
+  Interval cur = ivs[0];
+  vector<Seg> segs = {{cur.start, cur.end, cur.copyNumber, cur.pVal}};
+
+  for (size_t i = 1; i < ivs.size(); i++) {
+    const Interval &next = ivs[i];
+    const int gap = next.start - cur.end; // bp gap (expected to be a CN=2 span)
+
+    // Extend current block when:
+    //   (a) next segment is non-diploid (CN=2 always terminates a block),
+    //   (b) the current accumulator has non-diploid content, and
+    //   (c) the CN=2 bridge is within the threshold (gap may be 0 for abutting
+    //   segs).
+    const bool nextIsNonDip = (next.copyNumber != 2);
+    const bool curIsNonDip = (cur.copyNumber != 2 || segs.size() > 1);
+    const bool shortBridge = (gap >= 0 && gap <= maxBridgeBp);
+
+    if (nextIsNonDip && curIsNonDip && shortBridge) {
+      if (gap > 0) {
+        // Insert a synthetic CN=2 bridge segment for metric accounting.
+        segs.push_back({cur.end, next.start, 2, 0.0});
+      }
+      segs.push_back({next.start, next.end, next.copyNumber, next.pVal});
+      cur.end = next.end;
+    } else {
+      computeMetrics(cur, segs);
+      out.push_back(cur);
+      cur = next;
+      segs = {{next.start, next.end, next.copyNumber, next.pVal}};
+    }
+  }
+  computeMetrics(cur, segs);
+  out.push_back(cur);
+
+  ivs = std::move(out);
+}
 
 void NaiveCaller(vector<int> &covBins, vector<Interval> & UnmergedNaiveIntervals, double mean ){
 
@@ -1634,16 +1787,26 @@ void ThreadedBWE(ThreadInfo *threadInfo) {
       const int nSt   = (int)threadInfo->transP->size();
       const int maxC  = threadInfo->zinbClipMax;
       const auto& clips = (*threadInfo->clipBins)[curSeq];
+      const auto& clipsL = (*threadInfo->leftClipBins)[curSeq];
+      const auto& clipsR = (*threadInfo->rightClipBins)[curSeq];
       const int nbins = (int)clips.size();
       vector<vector<double>> localHist(nSt, vector<double>(maxC + 1, 0.0));
+      vector<vector<double>> localHistL(nSt, vector<double>(maxC + 1, 0.0));
+      vector<vector<double>> localHistR(nSt, vector<double>(maxC + 1, 0.0));
 
       for (int t = 1; t < nbins && t < (int)f[0].size(); t++) {
         double logNorm = f[0][t] + b[0][t];
         for (int st = 1; st < nSt; st++)
           logNorm = PairSumOfLogP(logNorm, f[st][t] + b[st][t]);
         const int c = min(clips[t], maxC);
-        for (int st = 0; st < nSt; st++)
-          localHist[st][c] += exp(f[st][t] + b[st][t] - logNorm);
+        const int cL = min(clipsL[t], maxC);
+        const int cR = min(clipsR[t], maxC);
+        for (int st = 0; st < nSt; st++) {
+          const double post = exp(f[st][t] + b[st][t] - logNorm);
+          localHist[st][c] += post;
+          localHistL[st][cL] += post;
+          localHistR[st][cR] += post;
+        }
       }
 
       pthread_mutex_lock(threadInfo->semaphore);
@@ -1663,8 +1826,11 @@ void ThreadedBWE(ThreadInfo *threadInfo) {
         *threadInfo->pModel += pChrom;
         // Merge ZINB histogram
         for (int st = 0; st < nSt; st++)
-          for (int c = 0; c <= maxC; c++)
+          for (int c = 0; c <= maxC; c++) {
             (*threadInfo->zinbClipHist)[st][c] += localHist[st][c];
+            (*threadInfo->zinbLeftHist)[st][c] += localHistL[st][c];
+            (*threadInfo->zinbRightHist)[st][c] += localHistR[st][c];
+          }
       }
 
       pthread_mutex_unlock(threadInfo->semaphore);
@@ -1752,6 +1918,8 @@ void ParseChrom(ThreadInfo *threadInfo) {
     while (continueParsing) {
       int totalSize=0;
       reads.resize(0);
+      const int nBinsChrom = contigLength / BIN_LENGTH;
+      vector<std::unique_ptr<bam1_t, BamRecordDeleter>> suppReads;
       pthread_mutex_lock(threadInfo->semaphore);
       int bufSize=0;
       while (bufSize < 100000000 and continueParsing) {
@@ -1766,8 +1934,12 @@ void ParseChrom(ThreadInfo *threadInfo) {
           break;
         }
         endpos=bam_endpos(b.get());
-        if ((b->core.flag & BAM_FSUPPLEMENTARY) == 0 && (b->core.flag & BAM_FSECONDARY) == 0) {
-	  totalBases+=b->core.l_qseq;
+        if (b->core.flag & BAM_FSECONDARY) {
+          // skip secondary alignments entirely
+        } else if (b->core.flag & BAM_FSUPPLEMENTARY) {
+          suppReads.push_back(std::move(b));
+        } else {
+          totalBases+=b->core.l_qseq;
           reads.push_back(std::move(b));
         }
       }
@@ -1781,7 +1953,6 @@ void ParseChrom(ThreadInfo *threadInfo) {
         startpos=b->core.pos;
         (*(*threadInfo).totalReads)[curSeq]++;
         (*(*threadInfo).totalBases)[curSeq]+= endpos-startpos;
-
 
         const int nCigar=b->core.n_cigar;
         uint32_t*cigar=bam_get_cigar(b.get());
@@ -1821,6 +1992,52 @@ void ParseChrom(ThreadInfo *threadInfo) {
 
         b.reset(nullptr);
       }
+      // Supplementary alignments are split-read breakpoints produced by
+      // pbmm2/minimap2. A leading H/S on a supplementary means the primary
+      // segment precedes it in read coordinates → record the alignment start as
+      // a left-clip (CN-increasing) event. A trailing H/S means the primary
+      // segment follows → record alignment end as a right-clip (CN-decreasing)
+      // event.  MIN_CLIP_LENGTH filters on the clipped length
+      // (= size of the other segment), matching the intent of the old soft-clip
+      // threshold.
+      for (auto &b : suppReads) {
+        if (b->core.qual < MIN_MAPQ) {
+          b.reset(nullptr);
+          continue;
+        }
+        const int nCigar = b->core.n_cigar;
+        if (nCigar == 0) {
+          b.reset(nullptr);
+          continue;
+        }
+        uint32_t *cigar = bam_get_cigar(b.get());
+
+        const int op0 = bam_cigar_op(cigar[0]);
+        if (op0 == BAM_CSOFT_CLIP || op0 == BAM_CHARD_CLIP) {
+          const int clipLen = bam_cigar_oplen(cigar[0]);
+          if (clipLen >= MIN_CLIP_LENGTH) {
+            const int bin = b->core.pos / BIN_LENGTH;
+            if (bin >= 0 && bin < nBinsChrom) {
+              (*threadInfo->clipBins)[curSeq][bin]++;
+              (*threadInfo->leftClipBins)[curSeq][bin]++;
+            }
+          }
+        }
+
+        const int opN = bam_cigar_op(cigar[nCigar - 1]);
+        if (opN == BAM_CSOFT_CLIP || opN == BAM_CHARD_CLIP) {
+          const int clipLen = bam_cigar_oplen(cigar[nCigar - 1]);
+          if (clipLen >= MIN_CLIP_LENGTH) {
+            const int suppEnd = bam_endpos(b.get());
+            const int bin = suppEnd / BIN_LENGTH;
+            if (bin >= 0 && bin < nBinsChrom) {
+              (*threadInfo->clipBins)[curSeq][bin]++;
+              (*threadInfo->rightClipBins)[curSeq][bin]++;
+            }
+          }
+        }
+        b.reset(nullptr);
+      }
     }
     // Never compute in the last bin
     const int nBins=contigLength/BIN_LENGTH;
@@ -1833,6 +2050,17 @@ void ParseChrom(ThreadInfo *threadInfo) {
         totCov+=nA[bp] + nC[bp] + nG[bp] + nT[bp] + nDel[bp];
       }
       (*threadInfo->covBins)[curSeq][bin] =totCov/BIN_LENGTH;
+
+      // Ensure excluded bins report 0 for both coverage and clips so they do
+      // not skew posteriors or transition mechanics.
+      if (threadInfo->excludedBins->size() > curSeq &&
+          (*threadInfo->excludedBins)[curSeq].size() > bin &&
+          (*threadInfo->excludedBins)[curSeq][bin]) {
+        (*threadInfo->covBins)[curSeq][bin] = 0;
+        (*threadInfo->clipBins)[curSeq][bin] = 0;
+        (*threadInfo->leftClipBins)[curSeq][bin] = 0;
+        (*threadInfo->rightClipBins)[curSeq][bin] = 0;
+      }
     }
     if ((*threadInfo->totalReads)[curSeq] > 0) {
       (*threadInfo->averageCoverage)[curSeq] = (*threadInfo->totalBases)[curSeq]/((double)(*threadInfo->totalReads)[curSeq]);
@@ -1922,6 +2150,7 @@ int EstimateCoverage(const string &bamFileName,
                      const vector<vector<int>> &allCovBins,
                      const vector<string> &chroms,
                      const vector<int> &lengths,
+                     const vector<vector<bool>> &excludedBins,
                      string &useChrom,
                      double &mean,
                      double &var)
@@ -1970,6 +2199,11 @@ int EstimateCoverage(const string &bamFileName,
     int binCov=0;
     int nSamples=0;
     for (size_t binIndex=0; binIndex<lastBin; binIndex++) {
+      if (excludedBins.size() > useChromIndex &&
+          excludedBins[useChromIndex].size() > binIndex &&
+          excludedBins[useChromIndex][binIndex]) {
+        continue;
+      }
       binCov=allCovBins[useChromIndex][binIndex];
       totCov+=binCov;
       if (binCov > 0) { nSamples++;}
@@ -1987,6 +2221,11 @@ int EstimateCoverage(const string &bamFileName,
     totCov=0;
     long totCovSq=0;
     for (size_t binIndex=0; binIndex<lastBin; binIndex++) {
+      if (excludedBins.size() > useChromIndex &&
+          excludedBins[useChromIndex].size() > binIndex &&
+          excludedBins[useChromIndex][binIndex]) {
+        continue;
+      }
       if (allCovBins[useChromIndex][binIndex] > 0.25*mean and
           allCovBins[useChromIndex][binIndex] < 1.75 * mean) {
         totCov+=allCovBins[useChromIndex][binIndex];
@@ -2334,6 +2573,11 @@ Parameters::Parameters()
     group(inputGroupName)->
     type_name("FILE");
 
+  CLI.add_option("--exclude-regions", excludeRegionsFile,
+    "Path to a BED file specifying genomic regions to exclude from coverage accumulation.\n"
+    "These regions will be ignored during parameter estimation.")->
+    group(inputGroupName);
+
   //
   // Depth calculation options
   //
@@ -2347,6 +2591,11 @@ Parameters::Parameters()
     "Fraction of per-bin NB LLR penalty applied at each bin: "
     "1.0 = full (100-bin equivalent), 0.5 = half, 0.0 = disabled.")->
     group(depthGroupName);
+
+  CLI.add_option("--merge-bridge", mergeBridge,
+    "Max CN=2 bridge length (bp) to absorb when forming composite non-diploid blocks.\n"
+    "Adjacent non-diploid segments separated by a CN=2 gap <= this threshold are merged.")->
+    group(depthGroupName)->default_val(100);
 
   CLI.add_option("-m", modelString,
     "Coverage model to use: Poisson (pois), or negative binomial (nb). [nb]")->
@@ -2617,6 +2866,11 @@ int hmcnc(Parameters& params) {
   vector<vector<Interval>> mergedNaiveIntervals;
   mergedNaiveIntervals.resize(contigNames.size());
 
+  vector<vector<bool>> excludedBins;
+  if (params.excludeRegionsFile != "") {
+    ReadExcludeRegions(params.excludeRegionsFile, contigNames, excludedBins);
+  }
+
   vector<double> chromCopyNumber;
   chromCopyNumber.resize(contigNames.size());
 
@@ -2624,6 +2878,8 @@ int hmcnc(Parameters& params) {
   // Resize again after nStates is set; initial placeholder size 7 × 257.
   const int ZINB_HIST_MAX = 256;
   vector<vector<double>> zinbClipHist(7, vector<double>(ZINB_HIST_MAX + 1, 0.0));
+  vector<vector<double>> zinbLeftHist(7, vector<double>(ZINB_HIST_MAX + 1, 0.0));
+  vector<vector<double>> zinbRightHist(7, vector<double>(ZINB_HIST_MAX + 1, 0.0));
 
   //////////////////////////////////////////////////
 
@@ -2655,6 +2911,9 @@ int hmcnc(Parameters& params) {
     threadInfo[procIndex].leftClipBins = &leftClipBins;
     threadInfo[procIndex].rightClipBins = &rightClipBins;
     threadInfo[procIndex].zinbClipHist = &zinbClipHist;
+    threadInfo[procIndex].zinbLeftHist = &zinbLeftHist;
+    threadInfo[procIndex].zinbRightHist = &zinbRightHist;
+    threadInfo[procIndex].excludedBins = &excludedBins;
     threadInfo[procIndex].zinbClipMax  = ZINB_HIST_MAX;
     threadInfo[procIndex].copyNumber = &copyNumber;
     threadInfo[procIndex].snvs = &snvs;
@@ -2781,7 +3040,7 @@ int hmcnc(Parameters& params) {
     StorePerChromAverageCoverage(covBins, averageCoverage);
   }
 
-  EstimateCoverage(params.bamFileName, covBins, allContigNames, allContigLengths, params.useChrom, mean, var);
+  EstimateCoverage(params.bamFileName, covBins, allContigNames, allContigLengths, excludedBins, params.useChrom, mean, var);
 
   // Override with WG stats if provided via CLI or param file
   if (params.wgMean > 0) {
@@ -3294,6 +3553,8 @@ int hmcnc(Parameters& params) {
       }
       // Reset ZINB histogram for this BW iteration
       zinbClipHist.assign(nStates, vector<double>(ZINB_HIST_MAX + 1, 0.0));
+      zinbLeftHist.assign(nStates, vector<double>(ZINB_HIST_MAX + 1, 0.0));
+      zinbRightHist.assign(nStates, vector<double>(ZINB_HIST_MAX + 1, 0.0));
       double px=0;
       int totalObs=0;
       curSeq=0;
@@ -3348,47 +3609,66 @@ int hmcnc(Parameters& params) {
       covCovTransP=updateTransP;
       clipCovCovTransP=updateClipTransP;
 
-      // ZINB M-step: update clipPi, clipMean, clipPhi from gamma-weighted histogram
+      // clipPhiL/R
       {
-        const int diploid = 2;
-        double sumGamma = 0.0, sumZero = 0.0, sumCount = 0.0;
-        for (int c = 0; c <= ZINB_HIST_MAX; c++) {
-          const double w = zinbClipHist[diploid][c];
-          sumGamma += w;
-          if (c == 0) sumZero += w;
-          else        sumCount += w * c;
-        }
-        if (sumGamma > 0.0) {
-          clipPi   = sumZero / sumGamma;
-          clipMean = (sumGamma > sumZero) ? sumCount / (sumGamma - sumZero) : clipMean;
-
-          // Build per-state nu for NR (use each state's conditional mean)
-          vector<double> stateNu(nStates, 0.0);
-          for (int st = 0; st < nStates; st++) {
-            double sg = 0.0, sc = 0.0;
-            for (int c = 1; c <= ZINB_HIST_MAX; c++) {
-              sg += zinbClipHist[st][c];
-              sc += zinbClipHist[st][c] * c;
-            }
-            stateNu[st] = (sg > 0.0) ? sc / sg : clipMean;
+        auto updateDirZINB = [&](const vector<vector<double>> &hist, double &pi,
+                                 double &mean, double &phi, const char *label) {
+          const int diploid = 2;
+          double sumGamma = 0.0, sumZero = 0.0, sumCount = 0.0;
+          for (int c = 0; c <= ZINB_HIST_MAX; c++) {
+            const double w = hist[diploid][c];
+            sumGamma += w;
+            if (c == 0)
+              sumZero += w;
+            else
+              sumCount += w * c;
           }
-          clipPhi = UpdateZINBPhi(clipPhi, stateNu, zinbClipHist);
-          cerr << "ZINB M-step: clipPi=" << clipPi
-               << "  clipMean=" << clipMean
-               << "  clipPhi=" << clipPhi << endl;
-
-          // Recompute Pn/Pcl with updated ZINB params
-          double pi_clipped_upd = max(0.0, clipPi - 0.3);
-          double clipHmean_upd  = clipMean * 2;
-          for (auto c=0; c < (int)contigNames.size(); c++) {
-            for (auto b=0; b < (int)clipBins[c].size(); b++) {
-              int cc = min(clipMax, clipBins[c][b]);
-              double Pn_  = LgZINB(cc, clipPi,          clipMean,      clipPhi) + PNeutral;
-              double Pcl_ = LgZINB(cc, pi_clipped_upd,  clipHmean_upd, clipPhi) + PClipped;
-              double dn   = PairSumOfLogP(Pn_, Pcl_);
-              Pn[c][b]  = Pn_  - dn;
-              Pcl[c][b] = Pcl_ - dn;
+          if (sumGamma > 0.0) {
+            pi = sumZero / sumGamma;
+            mean =
+                (sumGamma > sumZero) ? sumCount / (sumGamma - sumZero) : mean;
+            vector<double> stateNu(nStates, 0.0);
+            for (int st = 0; st < nStates; st++) {
+              double sg = 0.0, sc = 0.0;
+              for (int c = 1; c <= ZINB_HIST_MAX; c++) {
+                sg += hist[st][c];
+                sc += hist[st][c] * c;
+              }
+              stateNu[st] = (sg > 0.0) ? sc / sg : mean;
             }
+            phi = UpdateZINBPhi(phi, stateNu, hist);
+            cerr << label << " M-step: pi=" << pi << "  mean=" << mean
+                 << "  phi=" << phi << endl;
+          }
+        };
+        updateDirZINB(zinbLeftHist, clipPiL, clipMeanL, clipPhiL, "Left ZINB");
+        updateDirZINB(zinbRightHist, clipPiR, clipMeanR, clipPhiR,
+                      "Right ZINB");
+
+        // Recompute PnL/PclL and PnR/PclR with updated directional params
+        double pi_clippedL_upd = max(0.0, clipPiL - 0.3);
+        double pi_clippedR_upd = max(0.0, clipPiR - 0.3);
+        double clipHmeanL_upd = clipMeanL * 2;
+        double clipHmeanR_upd = clipMeanR * 2;
+        for (auto c = 0; c < (int)contigNames.size(); c++) {
+          for (auto b = 0; b < (int)leftClipBins[c].size(); b++) {
+            const int lc = min(clipMax, leftClipBins[c][b]);
+            double PnL_ = LgZINB(lc, clipPiL, clipMeanL, clipPhiL) + PNeutral;
+            double PclL_ =
+                LgZINB(lc, pi_clippedL_upd, clipHmeanL_upd, clipPhiL) +
+                PClipped;
+            double dnL = PairSumOfLogP(PnL_, PclL_);
+            PnL[c][b] = PnL_ - dnL;
+            PclL[c][b] = PclL_ - dnL;
+
+            const int rc = min(clipMax, rightClipBins[c][b]);
+            double PnR_ = LgZINB(rc, clipPiR, clipMeanR, clipPhiR) + PNeutral;
+            double PclR_ =
+                LgZINB(rc, pi_clippedR_upd, clipHmeanR_upd, clipPhiR) +
+                PClipped;
+            double dnR = PairSumOfLogP(PnR_, PclR_);
+            PnR[c][b] = PnR_ - dnR;
+            PclR[c][b] = PclR_ - dnR;
           }
         }
       }
