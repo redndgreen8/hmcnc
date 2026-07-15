@@ -20,7 +20,7 @@
 ```bash
 git clone https://github.com/chaissonlab/hmcnc.git
 cd hmcnc
-conda create -n hmcnc -c conda-forge gxx_osx-arm64 htslib boost samtools bedtools tabix
+conda create -n hmcnc -c conda-forge gxx htslib boost samtools bedtools tabix
 conda activate hmcnc
 cd src && make
 ```
@@ -110,8 +110,8 @@ hmcnclip hg38.fa -a sample.bam --epsi-weight 1.5 -o strict_calls.vcf
 
 ### Key Features Explained
 
-#### 1. Zero-Inflated Negative Binomial (ZINB) Emission Models
-Traditional Poisson coverage models fail on long-read datasets because read-depth variance (overdispersion) typically exceeds the mean. `hmcnc` models read-depth and clipping signatures using Negative Binomial distributions and resolves excess zero-observations (zero-inflation) dynamically via Newton-Raphson updates during Baum-Welch M-steps.
+#### 1. Negative Binomial (NB) & Zero-Inflated Negative Binomial (ZINB) Models
+Traditional Poisson coverage models fail on long-read datasets because variance (overdispersion) typically exceeds the mean. `hmcnc` addresses this by modeling **read depth** using a standard **Negative Binomial (NB)** distribution, and **clipping signatures** using a **Zero-Inflated Negative Binomial (ZINB)** distribution to handle excess zero-observations at non-breakpoint regions. The dispersion parameters are resolved dynamically via Newton-Raphson updates during the Baum-Welch M-steps.
 
 #### 2. Directional Clipping Signatures
 Modern long-read aligners (like `minimap2` and `pbmm2`) emit supplementary alignments at structural variant breakpoints rather than primary soft-clips. `hmcnc` separates these breakpoints into **leading (left)** and **trailing (right)** signals.
@@ -124,3 +124,6 @@ Raw bin-level HMM outputs often fragment large CNVs due to localized mapping dro
 
 #### 4. Exclusion Filtering (`--exclude-regions`)
 Pericentromeric arrays and telomeric repeats severely skew global read depth means and inflate variance. By supplying a BED file of exclusion regions, `hmcnc` bypasses these regions during initial parameter estimation *and* during VCF output, producing a highly stable, noise-resistant training baseline.
+
+### Benchmarking
+A complete benchmarking pipeline is provided in the `benchmarks/` directory using Snakemake (`benchmark.smk`). The pipeline evaluates the model against truth sets and provides comprehensive accuracy and performance metrics. See `benchmarking_results_review.md` for a detailed review of the recent evaluation results.
